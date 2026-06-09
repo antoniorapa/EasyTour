@@ -1,0 +1,18 @@
+# Flutter
+frontend/.dart_tool/
+frontend/build/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.packages
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Node
+backend/node_modules/
+backend/.env
+
+# OS
+.DS_Store
+Thumbs.db
