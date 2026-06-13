@@ -3,6 +3,8 @@ const cors = require("cors");
 const placesRoutes = require("./routes/places");
 const municipalityRoutes = require("./routes/municipality");
 const itinerariesRoutes = require("./routes/itineraries");
+const googlePlacesRoutes = require('./routes/googlePlaces');
+const wikiRoutes = require('./routes/wiki');
 require("dotenv").config();
 
 const { verifyConnection } = require("./db");
@@ -11,6 +13,8 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use('/google/places', googlePlacesRoutes);
+app.use('/wiki', wikiRoutes);
 
 app.get("/", (req, res) => {
   res.json({
@@ -48,7 +52,7 @@ app.get("/test-neo4j", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 verifyConnection().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server avviato su porta ${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server avviato sulla porta ${PORT}`);
   });
 });
