@@ -17,7 +17,7 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-  static const String baseUrl = 'http://10.195.229.82:3000';
+  static const String baseUrl = 'http://172.20.10.4:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
 
