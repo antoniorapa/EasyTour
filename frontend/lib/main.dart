@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'pages/search_page.dart';
+import 'pages/login_page.dart';
 
 void main() {
   runApp(const EasyTourApp());
@@ -20,7 +20,7 @@ class EasyTourApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const SearchPage(),
+      home: const LoginPage(),
     );
   }
 }

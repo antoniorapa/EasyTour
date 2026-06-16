@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/itinerary_stop.dart';
 import '../models/place.dart';
+import '../models/user.dart';
 
 class ApiService {
   /*
@@ -17,7 +18,7 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-  static const String baseUrl = 'http://172.20.10.4:3000';
+  static const String baseUrl = 'http://localhost:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
 
@@ -382,6 +383,99 @@ class ApiService {
       throw Exception(
         'Errore nel salvataggio dell’itinerario: ${response.body}',
       );
+    }
+  }
+
+  // ============================================================
+  //  METODI DI AUTENTICAZIONE
+  // ============================================================
+
+  /// Login unico email/password.
+  Future<AuthResult> login({
+    required String email,
+    required String password,
+  }) async {
+    final url = Uri.parse('$baseUrl/auth/login');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'email': email,
+        'password': password,
+      }),
+    );
+
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode == 200) {
+      return AuthResult.fromJson(decoded);
+    } else {
+      throw Exception(decoded['message']?.toString() ?? 'Errore login');
+    }
+  }
+
+  /// Registrazione turista.
+  Future<AuthResult> registerTourist({
+    required String nome,
+    required String email,
+    required String password,
+    required bool accettaCondizioni,
+  }) async {
+    final url = Uri.parse('$baseUrl/auth/register/tourist');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'nome': nome,
+        'email': email,
+        'password': password,
+        'accettaCondizioni': accettaCondizioni,
+      }),
+    );
+
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode == 201) {
+      return AuthResult.fromJson(decoded);
+    } else {
+      throw Exception(decoded['message']?.toString() ?? 'Errore registrazione');
+    }
+  }
+
+  /// Registrazione operatore comunale.
+  Future<AuthResult> registerMunicipality({
+    required String nome,
+    required String email,
+    required String password,
+    required String nomeComune,
+    required String ruoloReferente,
+    required String metodoPagamento,
+    required bool accettaCondizioni,
+  }) async {
+    final url = Uri.parse('$baseUrl/auth/register/municipality');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'nome': nome,
+        'email': email,
+        'password': password,
+        'nomeComune': nomeComune,
+        'ruoloReferente': ruoloReferente,
+        'metodoPagamento': metodoPagamento,
+        'accettaCondizioni': accettaCondizioni,
+      }),
+    );
+
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode == 201) {
+      return AuthResult.fromJson(decoded);
+    } else {
+      throw Exception(decoded['message']?.toString() ?? 'Errore registrazione');
     }
   }
 }
