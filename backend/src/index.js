@@ -5,6 +5,8 @@ const municipalityRoutes = require("./routes/municipality");
 const itinerariesRoutes = require("./routes/itineraries");
 const googlePlacesRoutes = require('./routes/googlePlaces');
 const wikiRoutes = require('./routes/wiki');
+const authRoutes = require("./routes/auth");
+const dashboardRoutes = require("./routes/dashboard");
 require("dotenv").config();
 
 const { verifyConnection } = require("./db");
@@ -15,6 +17,8 @@ app.use(cors());
 app.use(express.json());
 app.use('/google/places', googlePlacesRoutes);
 app.use('/wiki', wikiRoutes);
+app.use("/auth", authRoutes);
+app.use("/dashboard", dashboardRoutes);
 
 app.get("/", (req, res) => {
   res.json({
