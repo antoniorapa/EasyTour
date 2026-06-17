@@ -112,15 +112,16 @@ router.post('/register/municipality', async (req, res) => {
     email,
     password,
     nomeComune,
+    codiceAttivazione,
     ruoloReferente,
     metodoPagamento,
     accettaCondizioni,
   } = req.body;
 
-  if (!nome || !email || !password || !nomeComune) {
+  if (!nome || !email || !password || !nomeComune || !codiceAttivazione) {
     return res.status(400).json({
       message:
-        'Nome referente, email, password e nome del Comune sono obbligatori',
+        'Nome referente, email, password, nome del Comune e codice di attivazione sono obbligatori',
     });
   }
 
@@ -159,8 +160,21 @@ router.post('/register/municipality', async (req, res) => {
       });
     }
 
-    const municipalityId =
-      municipalityResult.records[0].get('m').properties.id;
+    const municipalityNode = municipalityResult.records[0].get('m').properties;
+    const municipalityId = municipalityNode.id;
+
+    // Verifica del codice di attivazione: deve combaciare con quello
+    // segreto del Comune. Impedisce a chiunque di registrarsi come
+    // operatore di un Comune senza esserne autorizzato.
+    if (
+      !municipalityNode.codiceAttivazione ||
+      municipalityNode.codiceAttivazione !== codiceAttivazione
+    ) {
+      return res.status(403).json({
+        message:
+          'Codice di attivazione non valido per il Comune indicato.',
+      });
+    }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const userId = `user_${Date.now()}`;
