@@ -103,7 +103,7 @@ class _RegisterPageState extends State<RegisterPage> {
       // Dopo la registrazione l'utente è già autenticato: redirect per ruolo.
       if (result.user.isOperatore) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => DashboardPage(user: result.user)),
+          MaterialPageRoute(builder: (_) => DashboardPage(user: result.user, token: result.token)),
         );
       } else {
         Navigator.of(context).pushReplacement(

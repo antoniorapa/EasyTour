@@ -42,9 +42,7 @@ class ItineraryStop {
       'tempoArrivoStimato': tempoArrivoStimato,
       'tempoPausaStimato': tempoPausaStimato,
       'distanzaDalPuntoPrecedenteKm': distanzaDalPuntoPrecedenteKm,
-      'place': {
-        'id': place.id,
-      },
+      'place': place.toJson(),
     };
   }
 

@@ -56,7 +56,7 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
 
       // Redirect in base al ruolo (cap. 6.5 del RAD).
-      _redirectByRole(result.user);
+      _redirectByRole(result.user, result.token);
     } catch (e) {
       setState(() {
         errorMessage = e.toString().replaceFirst('Exception: ', '');
@@ -66,11 +66,11 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _redirectByRole(User user) {
+  void _redirectByRole(User user, String token) {
     if (user.isOperatore) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => DashboardPage(user: user),
+          builder: (_) => DashboardPage(user: user, token: token),
         ),
       );
     } else {
