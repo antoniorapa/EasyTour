@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
 import '../widgets/easytour_header.dart';
-import 'search_page.dart';
+import 'dashboard_utente.dart';
 import 'register_page.dart';
 import 'dashboard_page.dart';
 
@@ -76,7 +76,7 @@ class _LoginPageState extends State<LoginPage> {
     } else {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => const SearchPage(),
+          builder: (_) => DashboardUtente(user: user, token: token),
         ),
       );
     }

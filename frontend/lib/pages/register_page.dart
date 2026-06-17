@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
 import '../widgets/easytour_header.dart';
-import 'search_page.dart';
+import 'dashboard_utente.dart';
 import 'dashboard_page.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -30,6 +30,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   // Campi specifici operatore comunale
   final nomeComuneController = TextEditingController();
+  final codiceAttivazioneController = TextEditingController();
   final ruoloReferenteController = TextEditingController();
   final metodoPagamentoController = TextEditingController();
 
@@ -46,6 +47,7 @@ class _RegisterPageState extends State<RegisterPage> {
     emailController.dispose();
     passwordController.dispose();
     nomeComuneController.dispose();
+    codiceAttivazioneController.dispose();
     ruoloReferenteController.dispose();
     metodoPagamentoController.dispose();
     super.dispose();
@@ -71,6 +73,11 @@ class _RegisterPageState extends State<RegisterPage> {
       return;
     }
 
+    if (isOperatore && codiceAttivazioneController.text.trim().isEmpty) {
+      setState(() => errorMessage = 'Inserisci il codice di attivazione del Comune');
+      return;
+    }
+
     setState(() {
       isLoading = true;
       errorMessage = null;
@@ -85,6 +92,7 @@ class _RegisterPageState extends State<RegisterPage> {
           email: email,
           password: password,
           nomeComune: nomeComuneController.text.trim(),
+          codiceAttivazione: codiceAttivazioneController.text.trim(),
           ruoloReferente: ruoloReferenteController.text.trim(),
           metodoPagamento: metodoPagamentoController.text.trim(),
           accettaCondizioni: accettaCondizioni,
@@ -107,7 +115,7 @@ class _RegisterPageState extends State<RegisterPage> {
         );
       } else {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const SearchPage()),
+          MaterialPageRoute(builder: (_) => DashboardUtente(user: result.user, token: result.token)),
         );
       }
     } catch (e) {
@@ -189,6 +197,14 @@ class _RegisterPageState extends State<RegisterPage> {
                     TextField(
                       controller: nomeComuneController,
                       decoration: _dec('Nome del Comune', Icons.location_city),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: codiceAttivazioneController,
+                      decoration: _dec(
+                        'Codice di attivazione',
+                        Icons.vpn_key_outlined,
+                      ),
                     ),
                     const SizedBox(height: 14),
                     TextField(
