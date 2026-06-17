@@ -478,4 +478,74 @@ class ApiService {
       throw Exception(decoded['message']?.toString() ?? 'Errore registrazione');
     }
   }
+
+  // ============================================================
+  //  METODI DASHBOARD COMUNALE
+  //  Tutte richiedono il token JWT dell'operatore.
+  // ============================================================
+
+  Map<String, String> _authHeaders(String token) => {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      };
+
+  /// Card riepilogo in alto (itinerari, luoghi, hidden gems, segnalazioni).
+  Future<Map<String, dynamic>> getDashboardSummary(String token) async {
+    final url = Uri.parse('$baseUrl/dashboard/summary');
+    final response = await http.get(url, headers: _authHeaders(token));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('Errore nel caricamento del riepilogo');
+    }
+  }
+
+  /// Luoghi più presenti negli itinerari (RF-C3).
+  Future<List<Map<String, dynamic>>> getTopPlaces(String token) async {
+    final url = Uri.parse('$baseUrl/dashboard/top-places');
+    final response = await http.get(url, headers: _authHeaders(token));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } else {
+      throw Exception('Errore nel caricamento dei luoghi più presenti');
+    }
+  }
+
+  /// Luoghi da valorizzare (RF-C4).
+  Future<List<Map<String, dynamic>>> getPlacesToImprove(String token) async {
+    final url = Uri.parse('$baseUrl/dashboard/places-to-improve');
+    final response = await http.get(url, headers: _authHeaders(token));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } else {
+      throw Exception('Errore nel caricamento dei luoghi da valorizzare');
+    }
+  }
+
+  /// Filtri più usati negli itinerari (RF-C5).
+  Future<List<Map<String, dynamic>>> getDashboardFilters(String token) async {
+    final url = Uri.parse('$baseUrl/dashboard/filters');
+    final response = await http.get(url, headers: _authHeaders(token));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } else {
+      throw Exception('Errore nel caricamento dei filtri');
+    }
+  }
+
+  /// Segnalazioni ricevute (RF-C6). Per ora torna lista vuota.
+  Future<List<Map<String, dynamic>>> getDashboardReports(String token) async {
+    final url = Uri.parse('$baseUrl/dashboard/reports');
+    final response = await http.get(url, headers: _authHeaders(token));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+      return data.map((e) => e as Map<String, dynamic>).toList();
+    } else {
+      throw Exception('Errore nel caricamento delle segnalazioni');
+    }
+  }
+
 }

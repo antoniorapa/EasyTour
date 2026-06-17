@@ -281,16 +281,30 @@ router.post('/save', async (req, res) => {
       const stop = stops[index];
       const stopId = `stop_${Date.now()}_${index}`;
 
-      const placeId = stop.place?.id || stop.placeId;
+      const place = stop.place || {};
+      const placeId = place.id || stop.placeId;
 
       if (!placeId) {
         continue;
       }
 
+      // MERGE invece di MATCH: se il Place non esiste ancora in Neo4j
+      // (es. tappa proveniente da Google Places), lo creiamo al volo
+      // coi dati inviati dal frontend. Così la tappa viene SEMPRE
+      // collegata e non si creano più itinerari "vuoti".
       await session.run(
         `
         MATCH (i:Itinerary {id: $itineraryId})
-        MATCH (p:Place {id: $placeId})
+        MERGE (p:Place {id: $placeId})
+        ON CREATE SET
+          p.nome = $nome,
+          p.latitudine = $latitudine,
+          p.longitudine = $longitudine,
+          p.rating = $rating,
+          p.numeroRecensioni = $numeroRecensioni,
+          p.descrizione = $descrizione,
+          p.immagineUrl = $immagineUrl,
+          p.categoria = $categoria
         CREATE (s:ItineraryStop {
           id: $stopId,
           ordine: $ordine,
@@ -307,6 +321,14 @@ router.post('/save', async (req, res) => {
           itineraryId,
           placeId,
           stopId,
+          nome: place.nome || 'Luogo senza nome',
+          latitudine: Number(place.latitudine || 0),
+          longitudine: Number(place.longitudine || 0),
+          rating: Number(place.rating || 0),
+          numeroRecensioni: Number(place.numeroRecensioni || 0),
+          descrizione: place.descrizione || '',
+          immagineUrl: place.immagineUrl || '',
+          categoria: place.categoria || '',
           ordine: Number(stop.ordine || index + 1),
           giorno: Number(stop.giorno || 1),
           tempoVisitaStimato: Number(stop.tempoVisitaStimato || 40),

@@ -6,7 +6,7 @@ const itinerariesRoutes = require("./routes/itineraries");
 const googlePlacesRoutes = require('./routes/googlePlaces');
 const wikiRoutes = require('./routes/wiki');
 const authRoutes = require("./routes/auth");
-const dashboardRoutes = require("./routes/dashboard");
+const dashboardRoutes = require("./routes/dashboard_comune");
 require("dotenv").config();
 
 const { verifyConnection } = require("./db");
