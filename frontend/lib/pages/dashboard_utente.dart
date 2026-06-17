@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user.dart';
 import 'login_page.dart';
 import 'search_page.dart';
-
+import 'saved_itinerary_screen.dart';
 /*
   Dashboard utente (turista).
   Schermata "home" mostrata al turista dopo il login.
@@ -36,13 +36,12 @@ class DashboardUtente extends StatelessWidget {
   }
 
   void _goToMyItineraries(BuildContext context) {
-    // Placeholder: la pagina "I miei itinerari" non è ancora pronta.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('La sezione "I miei itinerari" sarà disponibile a breve.'),
-      ),
-    );
-  }
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const SavedItinerariesScreen(),
+        ),
+      );
+    }
 
   @override
   Widget build(BuildContext context) {
