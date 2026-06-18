@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 
+/// EasyTourHeader — versione 2: HERO BLU.
+/// Una fascia blu con bordo inferiore ondulato; il logo (JPG su bianco) vive
+/// dentro una pastiglia bianca arrotondata così il rettangolo del JPG sparisce.
+/// I controlli back/logout/rightIcon diventano bianchi traslucidi su blu.
+///
+/// Nota mobile: la fascia è alta ma contenuta; sulle pagine interne con
+/// back/logout resta comunque leggibile. Tutti i parametri originali invariati.
 class EasyTourHeader extends StatelessWidget {
-  // Parametri esistenti (retrocompatibili): slot icona a destra generico,
-  // usato da search_page (verifica/lucchetto) e place_detail (back).
   final IconData? rightIcon;
   final VoidCallback? onRightIconTap;
-
-  // Nuovi parametri opzionali.
-  // showBack: mostra un tasto "indietro" a sinistra del logo.
-  // onBackTap: cosa fa il tasto indietro (default: Navigator.pop).
-  // showLogout / onLogoutTap: mostra un tasto logout a destra.
   final bool showBack;
   final VoidCallback? onBackTap;
   final bool showLogout;
@@ -27,91 +27,108 @@ class EasyTourHeader extends StatelessWidget {
 
   static const Color orange = Color(0xFFF58A00);
   static const Color primaryBlue = Color(0xFF005A8D);
+  static const Color darkBlue = Color(0xFF003F63);
 
   @override
-    Widget build(BuildContext context) {
-      return Container(
+  Widget build(BuildContext context) {
+    return ClipPath(
+      clipper: _WaveClipper(),
+      child: Container(
         width: double.infinity,
-        color: Colors.white,
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 14),
-        child: SafeArea(
-          bottom: false,
-          child: Row(
-            children: [
-              // Logo tutto a sinistra
-              Image.asset(
-                'assets/images/easytour_logo2.jpg',
-                height: 110,
-                fit: BoxFit.contain,
-              ),
-
-              const Spacer(),
-
-              // Slot icona generico esistente (retrocompatibile)
-              if (rightIcon != null)
-                InkWell(
-                  onTap: onRightIconTap,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    height: 42,
-                    width: 42,
-                    decoration: BoxDecoration(
-                      color: orange.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Icon(
-                      rightIcon,
-                      color: orange,
-                    ),
-                  ),
-                ),
-
-              // Tasto logout (opzionale), a destra
-              if (showLogout)
-                Padding(
-                  padding: EdgeInsets.only(left: rightIcon != null ? 8 : 0),
-                  child: InkWell(
-                    onTap: onLogoutTap,
-                    borderRadius: BorderRadius.circular(15),
-                    child: Container(
-                      height: 42,
-                      width: 42,
-                      decoration: BoxDecoration(
-                        color: orange.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: const Icon(
-                        Icons.logout_rounded,
-                        color: orange,
-                      ),
-                    ),
-                  ),
-                ),
-
-              // Tasto indietro (opzionale), ora a destra
-              if (showBack)
-                Padding(
-                  padding: EdgeInsets.only(left: showLogout ? 8 : 0),
-                  child: InkWell(
-                    onTap: onBackTap ?? () => Navigator.of(context).pop(),
-                    borderRadius: BorderRadius.circular(15),
-                    child: Container(
-                      height: 42,
-                      width: 42,
-                      decoration: BoxDecoration(
-                        color: primaryBlue.withOpacity(0.10),
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: const Icon(
-                        Icons.arrow_back_rounded,
-                        color: primaryBlue,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [primaryBlue, darkBlue],
           ),
         ),
-      );
-    }
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+            child: Row(
+              children: [
+                Image.asset(
+                    'assets/images/easytour_logo2_trasparente.png',
+                    height: 70,
+                    fit: BoxFit.contain,
+                  ),
+                const Spacer(),
+                if (rightIcon != null)
+                  _GlassButton(icon: rightIcon!, onTap: onRightIconTap),
+                if (showLogout)
+                  Padding(
+                    padding: EdgeInsets.only(left: rightIcon != null ? 8 : 0),
+                    child: _GlassButton(
+                      icon: Icons.logout_rounded,
+                      onTap: onLogoutTap,
+                    ),
+                  ),
+                if (showBack)
+                  Padding(
+                    padding: EdgeInsets.only(left: showLogout ? 8 : 0),
+                    child: _GlassButton(
+                      icon: Icons.arrow_back_rounded,
+                      onTap: onBackTap ?? () => Navigator.of(context).pop(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _GlassButton({required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: 44,
+        width: 44,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.18),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.35)),
+        ),
+        child: Icon(icon, color: Colors.white),
+      ),
+    );
+  }
+}
+
+/// Clip a onda morbida per il bordo inferiore della fascia.
+class _WaveClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    path.lineTo(0, size.height - 20);
+    path.quadraticBezierTo(
+      size.width * 0.25,
+      size.height,
+      size.width * 0.5,
+      size.height - 10,
+    );
+    path.quadraticBezierTo(
+      size.width * 0.75,
+      size.height - 22,
+      size.width,
+      size.height - 6,
+    );
+    path.lineTo(size.width, 0);
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }

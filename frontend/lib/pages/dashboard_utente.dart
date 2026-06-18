@@ -51,7 +51,6 @@ class DashboardUtente extends StatelessWidget {
         body: Column(
           children: [
             EasyTourHeader(
-              showBack: true,
               showLogout: true,
               onLogoutTap: () => _logout(context),
             ),
