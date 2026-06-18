@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/user.dart';
 import '../services/api_service.dart';
+import '../services/session_service.dart';
 import '../widgets/easytour_header.dart';
 import 'dashboard_utente.dart';
 import 'register_page.dart';
@@ -51,32 +52,71 @@ class _LoginPageState extends State<LoginPage> {
     });
 
     try {
-      final result = await apiService.login(email: email, password: password);
+      final result = await apiService.login(
+        email: email,
+        password: password,
+      );
+
+      /*
+        Salvataggio sessione persistente.
+
+        In questo modo:
+        - currentUserId resta disponibile in memoria;
+        - token e dati utente vengono salvati anche dopo chiusura app;
+        - la pagina "I miei itinerari" può recuperare l'utente loggato;
+        - al riavvio dell'app puoi richiamare SessionService.loadSession().
+      */
+      await SessionService.saveSession(
+        userId: result.user.id,
+        username: _getDisplayName(result.user),
+        email: result.user.email,
+        role: result.user.ruolo,
+        token: result.token,
+      );
 
       if (!mounted) return;
 
-      // Redirect in base al ruolo (cap. 6.5 del RAD).
       _redirectByRole(result.user, result.token);
     } catch (e) {
+      if (!mounted) return;
+
       setState(() {
         errorMessage = e.toString().replaceFirst('Exception: ', '');
       });
     } finally {
-      if (mounted) setState(() => isLoading = false);
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
+  }
+
+  String _getDisplayName(User user) {
+    final nome = user.nome.trim();
+
+    if (nome.isNotEmpty) {
+      return nome;
+    }
+
+    return user.email;
   }
 
   void _redirectByRole(User user, String token) {
     if (user.isOperatore) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => DashboardPage(user: user, token: token),
+          builder: (_) => DashboardPage(
+            user: user,
+            token: token,
+          ),
         ),
       );
     } else {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => DashboardUtente(user: user, token: token),
+          builder: (_) => DashboardUtente(
+            user: user,
+            token: token,
+          ),
         ),
       );
     }
@@ -107,22 +147,36 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: 6),
                   Text(
                     'Inserisci le tue credenziali per continuare',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                    ),
                   ),
                   const SizedBox(height: 28),
 
-                  // Email
                   TextField(
                     controller: emailController,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: _inputDecoration('Email', Icons.email_outlined),
+                    textInputAction: TextInputAction.next,
+                    enabled: !isLoading,
+                    decoration: _inputDecoration(
+                      'Email',
+                      Icons.email_outlined,
+                    ),
                   ),
+
                   const SizedBox(height: 16),
 
-                  // Password
                   TextField(
                     controller: passwordController,
                     obscureText: obscurePassword,
+                    enabled: !isLoading,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) {
+                      if (!isLoading) {
+                        _handleLogin();
+                      }
+                    },
                     decoration: _inputDecoration(
                       'Password',
                       Icons.lock_outline,
@@ -134,9 +188,13 @@ class _LoginPageState extends State<LoginPage> {
                               : Icons.visibility,
                           color: Colors.grey,
                         ),
-                        onPressed: () => setState(
-                          () => obscurePassword = !obscurePassword,
-                        ),
+                        onPressed: isLoading
+                            ? null
+                            : () {
+                          setState(() {
+                            obscurePassword = !obscurePassword;
+                          });
+                        },
                       ),
                     ),
                   ),
@@ -151,13 +209,18 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline,
-                              color: Colors.red, size: 20),
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.red,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               errorMessage!,
-                              style: const TextStyle(color: Colors.red),
+                              style: const TextStyle(
+                                color: Colors.red,
+                              ),
                             ),
                           ),
                         ],
@@ -167,13 +230,13 @@ class _LoginPageState extends State<LoginPage> {
 
                   const SizedBox(height: 28),
 
-                  // Pulsante Accedi
                   SizedBox(
                     height: 52,
                     child: ElevatedButton(
                       onPressed: isLoading ? null : _handleLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryBlue,
+                        disabledBackgroundColor: primaryBlue.withOpacity(0.55),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -181,41 +244,44 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       child: isLoading
                           ? const SizedBox(
-                              height: 22,
-                              width: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                color: Colors.white,
-                              ),
-                            )
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Colors.white,
+                        ),
+                      )
                           : const Text(
-                              'Accedi',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                        'Accedi',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
 
                   const SizedBox(height: 18),
 
-                  // Link registrazione
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         'Non hai un account?',
-                        style: TextStyle(color: Colors.grey[700]),
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                        ),
                       ),
                       TextButton(
                         onPressed: isLoading
                             ? null
-                            : () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => const RegisterPage(),
-                                  ),
-                                ),
+                            : () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const RegisterPage(),
+                            ),
+                          );
+                        },
                         child: const Text(
                           'Registrati',
                           style: TextStyle(
@@ -238,20 +304,36 @@ class _LoginPageState extends State<LoginPage> {
   InputDecoration _inputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: primaryBlue),
+      prefixIcon: Icon(
+        icon,
+        color: primaryBlue,
+      ),
       filled: true,
       fillColor: Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300),
+        borderSide: BorderSide(
+          color: Colors.grey.shade300,
+        ),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.grey.shade300),
+        borderSide: BorderSide(
+          color: Colors.grey.shade300,
+        ),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.grey.shade300,
+        ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: primaryBlue, width: 1.6),
+        borderSide: const BorderSide(
+          color: primaryBlue,
+          width: 1.6,
+        ),
       ),
     );
   }

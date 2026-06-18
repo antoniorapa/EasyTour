@@ -1,5 +1,5 @@
 import 'dart:math';
-
+import '../services/session_service.dart';
 import 'package:flutter/material.dart';
 
 import '../models/itinerary_stop.dart';
@@ -592,18 +592,39 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       return;
     }
 
+    final userId = SessionService.currentUserId;
+    final username = SessionService.currentUsername;
+
+    debugPrint('SALVATAGGIO ITINERARIO');
+    debugPrint('Session userId: $userId');
+    debugPrint('Session username: $username');
+    debugPrint('Session email: ${SessionService.currentEmail}');
+    debugPrint('Session token: ${SessionService.authToken}');
+
+    if (userId == null || userId.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Utente non loggato. Effettua di nuovo il login prima di salvare.',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       isSaving = true;
     });
 
     try {
-      await apiService.saveItinerary(
-        userId: 'user_turista_1',
+      final itineraryId = await apiService.saveItinerary(
+        userId: userId,
         municipalityId: widget.municipalityId,
         titolo: 'Itinerario ${widget.municipalityName}',
         filterType: widget.filterType,
         numeroGiorni: widget.numeroGiorni,
         stops: stops,
+
       );
 
       if (!mounted) return;
@@ -611,7 +632,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Itinerario salvato e associato al Comune di ${widget.municipalityName}.',
+            'Itinerario salvato correttamente. ID: $itineraryId',
           ),
         ),
       );
@@ -621,7 +642,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Errore nel salvataggio. Alcune tappe Google potrebbero non essere presenti in Neo4j. Dettaglio: $e',
+            'Errore nel salvataggio dell’itinerario: $e',
           ),
         ),
       );

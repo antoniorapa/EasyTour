@@ -18,7 +18,7 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-  static const String baseUrl = 'http://172.19.202.123:3000';
+  static const String baseUrl = 'http://localhost:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
 
@@ -55,6 +55,47 @@ class ApiService {
         : response.body;
 
     throw Exception(message);
+  }
+  Future<List<dynamic>> getMyItineraries(String userId) async {
+    final cleanUserId = Uri.encodeComponent(userId);
+
+    final url = Uri.parse('$baseUrl/itineraries/user/$cleanUserId');
+
+    print('GET miei itinerari: $url');
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 12));
+
+    print('Status miei itinerari: ${response.statusCode}');
+    print('Body miei itinerari: ${response.body}');
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+
+      if (data is Map<String, dynamic>) {
+        final itineraries = data['itineraries'];
+
+        if (itineraries is List) {
+          return itineraries;
+        }
+
+        return [];
+      }
+
+      if (data is List) {
+        return data;
+      }
+
+      return [];
+    }
+
+    throw Exception(
+      'Errore server: ${response.statusCode} - ${response.body}',
+    );
   }
   Future<Map<String, dynamic>> checkMunicipalityStatus(
       String municipalityId,
@@ -487,9 +528,9 @@ class ApiService {
   // ============================================================
 
   Map<String, String> _authHeaders(String token) => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $token',
+  };
 
   /// Card riepilogo in alto (itinerari, luoghi, hidden gems, segnalazioni).
   Future<Map<String, dynamic>> getDashboardSummary(String token) async {

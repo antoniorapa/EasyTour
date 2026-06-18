@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'itinerary_detail_screen.dart';
 import '../widgets/easytour_header.dart';
 import 'login_page.dart';
+import '../services/api_service.dart';
+import '../services/session_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  MODEL (minimal – allinea con quanto già presente nel progetto)
+//  MODEL
 // ─────────────────────────────────────────────────────────────────────────────
 
 class SavedItinerary {
@@ -14,7 +16,7 @@ class SavedItinerary {
   final int days;
   final int stopsCount;
   final DateTime createdAt;
-  final String? filter; // 'Ho solo 2 ore' | 'Budget limitato' | 'Posti nascosti' | null
+  final String? filter;
 
   const SavedItinerary({
     required this.id,
@@ -25,6 +27,108 @@ class SavedItinerary {
     required this.createdAt,
     this.filter,
   });
+
+  factory SavedItinerary.fromJson(Map<String, dynamic> json) {
+    final stops = json['stops'];
+    final rawStopsCount = json['stopsCount'] ?? json['numeroTappe'];
+
+    return SavedItinerary(
+      id: _asString(json['id'] ?? json['itineraryId']),
+      title: _asString(
+        json['title'] ??
+            json['titolo'] ??
+            json['nome'] ??
+            'Itinerario senza titolo',
+      ),
+      municipality: _asString(
+        json['municipality'] ??
+            json['municipalityName'] ??
+            json['comune'] ??
+            json['nomeComune'] ??
+            'Comune non disponibile',
+      ),
+      days: _asInt(json['days'] ?? json['numeroGiorni'], fallback: 1),
+      stopsCount: rawStopsCount != null
+          ? _asInt(rawStopsCount, fallback: 0)
+          : stops is List
+          ? stops.length
+          : 0,
+      createdAt: _parseDate(
+        json['createdAt'] ??
+            json['dataCreazione'] ??
+            json['created_at'] ??
+            json['date'],
+      ),
+      filter: _normalizeFilter(
+        json['filter'] ??
+            json['filterType'] ??
+            json['filtro'] ??
+            json['filtroUtilizzato'],
+      ),
+    );
+  }
+
+  static String _asString(dynamic value) {
+    if (value == null) return '';
+    return value.toString();
+  }
+
+  static int _asInt(dynamic value, {required int fallback}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return int.tryParse(value.toString()) ?? fallback;
+  }
+
+  static DateTime _parseDate(dynamic value) {
+    if (value == null) return DateTime.now();
+
+    if (value is DateTime) return value;
+
+    if (value is String) {
+      return DateTime.tryParse(value) ?? DateTime.now();
+    }
+
+    // Supporto per eventuali date Neo4j serializzate come oggetto
+    if (value is Map<String, dynamic>) {
+      final year = _asInt(value['year'], fallback: DateTime.now().year);
+      final month = _asInt(value['month'], fallback: DateTime.now().month);
+      final day = _asInt(value['day'], fallback: DateTime.now().day);
+      final hour = _asInt(value['hour'], fallback: 0);
+      final minute = _asInt(value['minute'], fallback: 0);
+
+      return DateTime(year, month, day, hour, minute);
+    }
+
+    return DateTime.now();
+  }
+
+  static String? _normalizeFilter(dynamic value) {
+    if (value == null) return null;
+
+    final filter = value.toString().trim();
+
+    if (filter.isEmpty || filter == 'none' || filter == 'Nessun filtro') {
+      return null;
+    }
+
+    switch (filter) {
+      case 'two_hours':
+      case 'Ho solo 2 ore':
+        return 'Ho solo 2 ore';
+
+      case 'budget':
+      case 'Budget limitato':
+        return 'Budget limitato';
+
+      case 'hidden':
+      case 'Posti nascosti':
+        return 'Posti nascosti';
+
+      default:
+        return filter;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,51 +148,94 @@ class _SavedItinerariesScreenState extends State<SavedItinerariesScreen> {
   static const Color _primaryLight = Color(0xFFE8EFFD);
   static const Color _textPrimary = Color(0xFF111827);
   static const Color _textSecondary = Color(0xFF6B7280);
-  static const Color _divider = Color(0xFFE5E7EB);
   static const Color _background = Color(0xFFF9FAFB);
 
-  // ── mock data (sostituire con chiamata al backend) ────────────────────────
-  final List<SavedItinerary> _itineraries = [
-    SavedItinerary(
-      id: '1',
-      title: 'Weekend a Roma',
-      municipality: 'Roma',
-      days: 3,
-      stopsCount: 8,
-      createdAt: DateTime(2026, 6, 10),
-    ),
-    SavedItinerary(
-      id: '2',
-      title: 'Napoli in un giorno',
-      municipality: 'Napoli',
-      days: 1,
-      stopsCount: 5,
-      createdAt: DateTime(2026, 5, 28),
-      filter: 'Ho solo 2 ore',
-    ),
-    SavedItinerary(
-      id: '3',
-      title: 'Posti nascosti di Firenze',
-      municipality: 'Firenze',
-      days: 2,
-      stopsCount: 6,
-      createdAt: DateTime(2026, 4, 15),
-      filter: 'Posti nascosti',
-    ),
-  ];
+  final ApiService _apiService = ApiService();
+
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<SavedItinerary> _itineraries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyItineraries();
+  }
+
+  Future<void> _loadMyItineraries() async {
+    final userId = SessionService.currentUserId;
+    debugPrint('SESSION userId: ${SessionService.currentUserId}');
+    debugPrint('SESSION username: ${SessionService.currentUsername}');
+    debugPrint('SESSION email: ${SessionService.currentEmail}');
+    debugPrint('SESSION token: ${SessionService.authToken}');
+    if (userId == null || userId.trim().isEmpty) {
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Utente non loggato. Effettua il login per visualizzare i tuoi itinerari.';
+        _itineraries = [];
+      });
+
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await _apiService.getMyItineraries(userId);
+
+      final loadedItineraries = result
+          .whereType<Map<String, dynamic>>()
+          .map((item) => SavedItinerary.fromJson(item))
+          .toList();
+
+      loadedItineraries.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      if (!mounted) return;
+
+      setState(() {
+        _itineraries = loadedItineraries;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _errorMessage = 'Errore durante il caricamento degli itinerari: $e';
+        _isLoading = false;
+      });
+    }
+  }
 
   // ── helpers ───────────────────────────────────────────────────────────────
 
   String _formatDate(DateTime d) {
     const months = [
-      '', 'gen', 'feb', 'mar', 'apr', 'mag', 'giu',
-      'lug', 'ago', 'set', 'ott', 'nov', 'dic'
+      '',
+      'gen',
+      'feb',
+      'mar',
+      'apr',
+      'mag',
+      'giu',
+      'lug',
+      'ago',
+      'set',
+      'ott',
+      'nov',
+      'dic'
     ];
+
     return '${d.day} ${months[d.month]} ${d.year}';
   }
 
   Color _filterColor(String? filter) {
     if (filter == null) return Colors.transparent;
+
     switch (filter) {
       case 'Ho solo 2 ore':
         return const Color(0xFFFEF3C7);
@@ -103,6 +250,7 @@ class _SavedItinerariesScreenState extends State<SavedItinerariesScreen> {
 
   Color _filterTextColor(String? filter) {
     if (filter == null) return Colors.transparent;
+
     switch (filter) {
       case 'Ho solo 2 ore':
         return const Color(0xFF92400E);
@@ -115,88 +263,186 @@ class _SavedItinerariesScreenState extends State<SavedItinerariesScreen> {
     }
   }
 
+  void _logout() {
+    SessionService.logout();
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+          (_) => false,
+    );
+  }
+
   // ── build ─────────────────────────────────────────────────────────────────
 
   @override
-    Widget build(BuildContext context) {
-      return Scaffold(
-        backgroundColor: _background,
-        body: Column(
-          children: [
-            EasyTourHeader(
-              showBack: true,
-              showLogout: true,
-              onLogoutTap: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                );
-              },
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _background,
+      body: Column(
+        children: [
+          EasyTourHeader(
+            showBack: true,
+            showLogout: true,
+            onLogoutTap: _logout,
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _loadMyItineraries,
+              child: _buildBody(),
             ),
-            Expanded(
-              child: _itineraries.isEmpty ? _buildEmpty() : _buildList(),
-            ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: _primary),
       );
     }
 
-  Widget _buildEmpty() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: _primaryLight,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.map_outlined, color: _primary, size: 36),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Nessun itinerario salvato',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: _textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Inizia a esplorare e salva il tuo primo percorso.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: _textSecondary),
-            ),
-          ],
+    if (_errorMessage != null) {
+      return _buildError();
+    }
+
+    if (_itineraries.isEmpty) {
+      return _buildEmpty();
+    }
+
+    return _buildList();
+  }
+
+  Widget _buildError() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(32),
+      children: [
+        const SizedBox(height: 80),
+        Container(
+          width: 80,
+          height: 80,
+          decoration: const BoxDecoration(
+            color: Color(0xFFFEE2E2),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFDC2626),
+            size: 38,
+          ),
         ),
-      ),
+        const SizedBox(height: 20),
+        const Text(
+          'Impossibile caricare gli itinerari',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            color: _textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _errorMessage!,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 14,
+            color: _textSecondary,
+          ),
+        ),
+        const SizedBox(height: 22),
+        ElevatedButton.icon(
+          onPressed: _loadMyItineraries,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Riprova'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmpty() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(32),
+      children: [
+        const SizedBox(height: 100),
+        Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: const BoxDecoration(
+                  color: _primaryLight,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.map_outlined,
+                  color: _primary,
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Nessun itinerario salvato',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: _textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Inizia a esplorare e salva il tuo primo percorso.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildList() {
     return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       itemCount: _itineraries.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (context, index) => _ItineraryCard(
-        itinerary: _itineraries[index],
-        filterBg: _filterColor(_itineraries[index].filter),
-        filterFg: _filterTextColor(_itineraries[index].filter),
-        formattedDate: _formatDate(_itineraries[index].createdAt),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => ItineraryDetailScreen(
-                itinerary: _itineraries[index],
+      itemBuilder: (context, index) {
+        final itinerary = _itineraries[index];
+
+        return _ItineraryCard(
+          itinerary: itinerary,
+          filterBg: _filterColor(itinerary.filter),
+          filterFg: _filterTextColor(itinerary.filter),
+          formattedDate: _formatDate(itinerary.createdAt),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ItineraryDetailScreen(
+                  itinerary: itinerary,
+                ),
               ),
-            ),
-          );
-        },
-      ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -243,7 +489,6 @@ class _ItineraryCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Icon container
               Container(
                 width: 48,
                 height: 48,
@@ -251,15 +496,17 @@ class _ItineraryCard extends StatelessWidget {
                   color: _primaryLight,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.luggage_outlined, color: _primary, size: 24),
+                child: const Icon(
+                  Icons.luggage_outlined,
+                  color: _primary,
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 14),
-              // Content
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title + chevron
                     Row(
                       children: [
                         Expanded(
@@ -272,34 +519,49 @@ class _ItineraryCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const Icon(Icons.chevron_right, color: _textSecondary, size: 20),
+                        const Icon(
+                          Icons.chevron_right,
+                          color: _textSecondary,
+                          size: 20,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    // Municipality
                     Row(
                       children: [
-                        const Icon(Icons.location_on_outlined, color: _textSecondary, size: 13),
+                        const Icon(
+                          Icons.location_on_outlined,
+                          color: _textSecondary,
+                          size: 13,
+                        ),
                         const SizedBox(width: 2),
-                        Text(
-                          itinerary.municipality,
-                          style: const TextStyle(fontSize: 13, color: _textSecondary),
+                        Expanded(
+                          child: Text(
+                            itinerary.municipality,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: _textSecondary,
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 10),
-                    // Meta chips row
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
                       children: [
                         _MetaChip(
                           icon: Icons.calendar_today_outlined,
-                          label: '${itinerary.days} ${itinerary.days == 1 ? "giorno" : "giorni"}',
+                          label:
+                          '${itinerary.days} ${itinerary.days == 1 ? "giorno" : "giorni"}',
                         ),
                         _MetaChip(
                           icon: Icons.place_outlined,
-                          label: '${itinerary.stopsCount} luoghi',
+                          label:
+                          '${itinerary.stopsCount} ${itinerary.stopsCount == 1 ? "luogo" : "luoghi"}',
                         ),
                         if (itinerary.filter != null)
                           _FilterChip(
@@ -312,7 +574,10 @@ class _ItineraryCard extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       'Salvato il $formattedDate',
-                      style: const TextStyle(fontSize: 11, color: _textSecondary),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: _textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -329,7 +594,10 @@ class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _MetaChip({required this.icon, required this.label});
+  const _MetaChip({
+    required this.icon,
+    required this.label,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -342,11 +610,18 @@ class _MetaChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: const Color(0xFF6B7280)),
+          Icon(
+            icon,
+            size: 11,
+            color: const Color(0xFF6B7280),
+          ),
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+            style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF6B7280),
+            ),
           ),
         ],
       ),
@@ -359,7 +634,11 @@ class _FilterChip extends StatelessWidget {
   final Color bg;
   final Color fg;
 
-  const _FilterChip({required this.label, required this.bg, required this.fg});
+  const _FilterChip({
+    required this.label,
+    required this.bg,
+    required this.fg,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -371,7 +650,11 @@ class _FilterChip extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: fg),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: fg,
+        ),
       ),
     );
   }
