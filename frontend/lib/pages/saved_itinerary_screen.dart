@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'itinerary_detail_screen.dart';
+import '../widgets/easytour_header.dart';
+import 'login_page.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  MODEL (minimal – allinea con quanto già presente nel progetto)
@@ -116,33 +118,27 @@ class _SavedItinerariesScreenState extends State<SavedItinerariesScreen> {
   // ── build ─────────────────────────────────────────────────────────────────
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _background,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: _textPrimary),
-          onPressed: () => Navigator.of(context).pop(),
+    Widget build(BuildContext context) {
+      return Scaffold(
+        backgroundColor: _background,
+        body: Column(
+          children: [
+            EasyTourHeader(
+              showBack: true,
+              showLogout: true,
+              onLogoutTap: () {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                );
+              },
+            ),
+            Expanded(
+              child: _itineraries.isEmpty ? _buildEmpty() : _buildList(),
+            ),
+          ],
         ),
-        title: const Text(
-          'I miei itinerari',
-          style: TextStyle(
-            color: _textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: _divider, height: 1),
-        ),
-      ),
-      body: _itineraries.isEmpty ? _buildEmpty() : _buildList(),
-    );
-  }
+      );
+    }
 
   Widget _buildEmpty() {
     return Center(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'saved_itinerary_screen.dart' show SavedItinerary;
 import 'place_detail_screen.dart';
+import '../widgets/easytour_header.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  MODEL

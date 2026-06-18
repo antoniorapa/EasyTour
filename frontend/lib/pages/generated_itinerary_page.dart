@@ -6,6 +6,7 @@ import '../models/itinerary_stop.dart';
 import '../models/place.dart';
 import '../services/api_service.dart';
 import 'place_detail_page.dart';
+import '../widgets/easytour_header.dart';
 
 class GeneratedItineraryPage extends StatefulWidget {
   final List<ItineraryStop> initialStops;

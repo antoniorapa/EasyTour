@@ -13,6 +13,7 @@ import '../models/place.dart';
 import '../services/api_service.dart';
 import 'generated_itinerary_page.dart';
 import 'place_detail_page.dart';
+import 'login_page.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -1175,10 +1176,14 @@ class _SearchPageState extends State<SearchPage> {
           Column(
             children: [
               EasyTourHeader(
-                rightIcon: canUseApp
-                    ? Icons.verified_rounded
-                    : Icons.lock_outline_rounded,
-              ),
+                              showBack: true,
+                              showLogout: true,
+                              onLogoutTap: () {
+                                Navigator.of(context).pushReplacement(
+                                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                                );
+                              },
+                            ),
               Expanded(
                 child: RefreshIndicator(
                   color: primaryBlue,

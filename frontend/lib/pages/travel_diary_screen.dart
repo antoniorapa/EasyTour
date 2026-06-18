@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'itinerary_detail_screen.dart' show ItineraryStop;
-
+import '../widgets/easytour_header.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 //  TRAVEL DIARY SCREEN
 // ─────────────────────────────────────────────────────────────────────────────

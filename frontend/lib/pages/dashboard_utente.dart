@@ -4,6 +4,7 @@ import '../models/user.dart';
 import 'login_page.dart';
 import 'search_page.dart';
 import 'saved_itinerary_screen.dart';
+import '../widgets/easytour_header.dart';
 /*
   Dashboard utente (turista).
   Schermata "home" mostrata al turista dopo il login.
@@ -44,88 +45,69 @@ class DashboardUtente extends StatelessWidget {
     }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: lightBackground,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Barra in alto: logo + logout
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on, color: orange, size: 28),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'EasyTour',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: primaryBlue,
-                        ),
+    Widget build(BuildContext context) {
+      return Scaffold(
+        backgroundColor: lightBackground,
+        body: Column(
+          children: [
+            EasyTourHeader(
+              showBack: true,
+              showLogout: true,
+              onLogoutTap: () => _logout(context),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Saluto
+                    Text(
+                      'Ciao, ${user.nome}!',
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: darkBlue,
                       ),
-                    ],
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.logout, color: primaryBlue),
-                    tooltip: 'Esci',
-                    onPressed: () => _logout(context),
-                  ),
-                ],
-              ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Cosa vuoi fare oggi?',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[600]),
+                    ),
 
-              const SizedBox(height: 32),
+                    const SizedBox(height: 36),
 
-              // Saluto
-              Text(
-                'Ciao, ${user.nome}!',
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: darkBlue,
+                    // Pulsante: cerca luoghi
+                    _actionCard(
+                      context: context,
+                      icon: Icons.search_rounded,
+                      iconBg: const Color(0xFFE3EEF6),
+                      iconColor: primaryBlue,
+                      title: 'Cerca luoghi',
+                      subtitle: 'Trova attrazioni e genera un itinerario',
+                      onTap: () => _goToSearch(context),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Pulsante: i miei itinerari
+                    _actionCard(
+                      context: context,
+                      icon: Icons.map_outlined,
+                      iconBg: const Color(0xFFFDEFD9),
+                      iconColor: orange,
+                      title: 'I miei itinerari',
+                      subtitle: 'Rivedi i percorsi che hai salvato',
+                      onTap: () => _goToMyItineraries(context),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Cosa vuoi fare oggi?',
-                style: TextStyle(fontSize: 15, color: Colors.grey[600]),
-              ),
-
-              const SizedBox(height: 36),
-
-              // Pulsante: cerca luoghi
-              _actionCard(
-                context: context,
-                icon: Icons.search_rounded,
-                iconBg: const Color(0xFFE3EEF6),
-                iconColor: primaryBlue,
-                title: 'Cerca luoghi',
-                subtitle: 'Trova attrazioni e genera un itinerario',
-                onTap: () => _goToSearch(context),
-              ),
-              const SizedBox(height: 16),
-
-              // Pulsante: i miei itinerari
-              _actionCard(
-                context: context,
-                icon: Icons.map_outlined,
-                iconBg: const Color(0xFFFDEFD9),
-                iconColor: orange,
-                title: 'I miei itinerari',
-                subtitle: 'Rivedi i percorsi che hai salvato',
-                onTap: () => _goToMyItineraries(context),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ),
-    );
-  }
+      );
+    }
 
   Widget _actionCard({
     required BuildContext context,

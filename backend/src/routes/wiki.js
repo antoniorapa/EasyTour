@@ -44,17 +44,13 @@ router.get('/summary', async (req, res) => {
     const results = searchResponse.data?.query?.search || [];
 
     if (results.length === 0) {
-      return res.json({
-        titolo: summary.title || title,
-        descrizione:
-          summary.extract || 'Descrizione non disponibile da Wikipedia.',
-        wikipediaUrl: summary.content_urls?.desktop?.page || null,
-        immagineUrl:
-          summary.thumbnail?.source ||
-          summary.originalimage?.source ||
-          null,
-      });
-    }
+          return res.json({
+            titolo: query,
+            descrizione: 'Descrizione non disponibile da Wikipedia.',
+            wikipediaUrl: null,
+            immagineUrl: null,
+          });
+        }
 
     const title = results[0].title;
     const encodedTitle = normalizeTitle(title);

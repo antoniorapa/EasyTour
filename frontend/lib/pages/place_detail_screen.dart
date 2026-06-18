@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'itinerary_detail_screen.dart' show ItineraryStop;
 import 'travel_diary_screen.dart';
+import '../widgets/easytour_header.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  PLACE DETAIL SCREEN  (versione aggiornata con bottone "Diario di viaggio")

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
 import 'login_page.dart';
+import '../widgets/easytour_header.dart';
 
 class DashboardPage extends StatefulWidget {
   final User user;
@@ -137,8 +138,11 @@ class _DashboardPageState extends State<DashboardPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildTopBar(),
-                          const SizedBox(height: 20),
+                          EasyTourHeader(
+                                                      showLogout: true,
+                                                      onLogoutTap: _logout,
+                                                    ),
+                                                    const SizedBox(height: 20),
                           _buildTitle(),
                           const SizedBox(height: 16),
                           _buildStatCards(),
@@ -307,7 +311,7 @@ class _DashboardPageState extends State<DashboardPage> {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
-      childAspectRatio: 1.5,
+      childAspectRatio: 1.35,
       children: cards.map(_statCard).toList(),
     );
   }
