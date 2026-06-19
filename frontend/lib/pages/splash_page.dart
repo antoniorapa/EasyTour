@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'login_page.dart';
+import 'dashboard_page.dart';
+import 'dashboard_utente.dart';
+import '../models/user.dart';
+import '../services/session_service.dart';
 
 /// Splash — versione MODERNA.
 /// Profondità a strati: la mappa del mondo (la tua immagine) tenuissima
@@ -92,15 +96,36 @@ class _SplashPageState extends State<SplashPage>
       if (mounted) _pinController.forward();
     });
 
-    Timer(const Duration(milliseconds: 5000), _goToLogin);
+    Timer(const Duration(milliseconds: 5000), _goToNextPage);
   }
 
-  void _goToLogin() {
+  Future<void> _goToNextPage() async {
     if (!mounted) return;
+
+    final bool isLoggedIn = await SessionService.loadSession();
+    if (!mounted) return;
+
+    Widget destinazione;
+    if (isLoggedIn) {
+      final user = User(
+        id: SessionService.currentUserId ?? '',
+        nome: SessionService.currentUsername ?? '',
+        email: SessionService.currentEmail ?? '',
+        ruolo: SessionService.currentRole ?? 'TURISTA',
+      );
+      final token = SessionService.authToken ?? '';
+
+      destinazione = user.isOperatore
+          ? DashboardPage(user: user, token: token)
+          : DashboardUtente(user: user, token: token);
+    } else {
+      destinazione = const LoginPage();
+    }
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 600),
-        pageBuilder: (_, animation, __) => const LoginPage(),
+        pageBuilder: (_, animation, __) => destinazione,
         transitionsBuilder: (_, animation, __, child) =>
             FadeTransition(opacity: animation, child: child),
       ),

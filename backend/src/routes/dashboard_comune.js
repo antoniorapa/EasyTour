@@ -144,11 +144,10 @@ router.get('/places-to-improve', async (req, res) => {
     // ordina per presenze crescenti e rating decrescente.
     const result = await session.run(
       `
-      MATCH (p:Place)
-      OPTIONAL MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId}),
-                     (i)-[:HAS_STOP]->(:ItineraryStop)-[:REFERS_TO]->(p)
-      WITH p, count(i) AS presenze
+      MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
+      MATCH (i)-[:HAS_STOP]->(:ItineraryStop)-[:REFERS_TO]->(p:Place)
       WHERE p.rating IS NOT NULL
+      WITH p, count(*) AS presenze
       RETURN p.id AS id, p.nome AS nome, p.immagineUrl AS immagineUrl,
              p.rating AS rating, presenze
       ORDER BY presenze ASC, p.rating DESC
@@ -189,10 +188,15 @@ router.get('/filters', async (req, res) => {
 
     const result = await session.run(
       `
-      MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
-      WITH coalesce(i.filterType, "none") AS filtroRaw
-      WITH CASE filtroRaw WHEN "none" THEN "Tutti" ELSE filtroRaw END AS filtro
-      RETURN filtro, count(*) AS quanti
+      WITH ['Tutti', 'ho_solo_2_ore', 'budget_limitato', 'posti_nascosti'] AS codici
+      UNWIND codici AS codice
+      OPTIONAL MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
+      WITH codice,
+           CASE codice WHEN 'Tutti' THEN 'none' ELSE codice END AS codiceRaw,
+           i
+      WITH codice, codiceRaw,
+           count(CASE WHEN coalesce(i.filterType, 'none') = codiceRaw THEN 1 END) AS quanti
+      RETURN codice AS filtro, quanti
       ORDER BY quanti DESC
       `,
       { municipalityId }

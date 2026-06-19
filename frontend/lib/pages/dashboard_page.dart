@@ -24,6 +24,8 @@ class _DashboardPageState extends State<DashboardPage> {
   static const Color lightBackground = Color(0xFFF4F7FA);
 
   bool isLoading = true;
+  bool _topPlacesExpanded = false;
+  bool _improveExpanded = false;
   String? errorMessage;
 
   Map<String, dynamic> summary = {};
@@ -356,6 +358,14 @@ class _DashboardPageState extends State<DashboardPage> {
 
   // --- Sezione luoghi (più presenti + da valorizzare) ---
   Widget _buildPlacesSection() {
+    // Quanti elementi mostrare in base allo stato espanso.
+    final topCount = _topPlacesExpanded
+        ? topPlaces.length
+        : (topPlaces.length > 3 ? 3 : topPlaces.length);
+    final improveCount = _improveExpanded
+        ? placesToImprove.length
+        : (placesToImprove.length > 3 ? 3 : placesToImprove.length);
+
     return Column(
       children: [
         _card(
@@ -363,10 +373,18 @@ class _DashboardPageState extends State<DashboardPage> {
           child: topPlaces.isEmpty
               ? _emptyHint('Nessun itinerario salvato')
               : Column(
-                  children: List.generate(
-                    topPlaces.length > 3 ? 3 : topPlaces.length,
-                    (i) => _topPlaceRow(i + 1, topPlaces[i]),
-                  ),
+                  children: [
+                    ...List.generate(
+                      topCount,
+                      (i) => _topPlaceRow(i + 1, topPlaces[i]),
+                    ),
+                    if (topPlaces.length > 3)
+                      _vediTuttiToggle(
+                        expanded: _topPlacesExpanded,
+                        onTap: () => setState(
+                            () => _topPlacesExpanded = !_topPlacesExpanded),
+                      ),
+                  ],
                 ),
         ),
         const SizedBox(height: 16),
@@ -376,13 +394,49 @@ class _DashboardPageState extends State<DashboardPage> {
           child: placesToImprove.isEmpty
               ? _emptyHint('Nessun dato disponibile')
               : Column(
-                  children: List.generate(
-                    placesToImprove.length > 3 ? 3 : placesToImprove.length,
-                    (i) => _improveRow(placesToImprove[i]),
-                  ),
+                  children: [
+                    ...List.generate(
+                      improveCount,
+                      (i) => _improveRow(placesToImprove[i]),
+                    ),
+                    if (placesToImprove.length > 3)
+                      _vediTuttiToggle(
+                        expanded: _improveExpanded,
+                        onTap: () => setState(
+                            () => _improveExpanded = !_improveExpanded),
+                      ),
+                  ],
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _vediTuttiToggle({
+    required bool expanded,
+    required VoidCallback onTap,
+  }) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          foregroundColor: primaryBlue,
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(expanded ? 'Vedi meno' : 'Vedi tutti',
+                style: const TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 13)),
+            const SizedBox(width: 2),
+            Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18),
+          ],
+        ),
+      ),
     );
   }
 
@@ -514,42 +568,82 @@ class _DashboardPageState extends State<DashboardPage> {
         .map((f) => (f['quanti'] ?? 0) as int)
         .fold<int>(1, (a, b) => a > b ? a : b);
 
-    return SizedBox(
-      height: 160,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: filters.map((f) {
-          final val = (f['quanti'] ?? 0) as int;
-          final h = (val / maxVal) * 110;
-          return Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Text('$val',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13)),
-                const SizedBox(height: 4),
-                Container(
-                  height: h < 6 ? 6 : h,
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  decoration: BoxDecoration(
-                    color: primaryBlue,
-                    borderRadius: BorderRadius.circular(6),
+    return Column(
+      children: filters.map((f) {
+        final val = (f['quanti'] ?? 0) as int;
+        final frazione = val / maxVal;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Row(
+            children: [
+              // Etichetta a sinistra, più stretta -> la barra parte prima.
+              SizedBox(
+                width: 80,
+                child: Text(
+                  f['filtro']?.toString() ?? '-',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[800]),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final fullWidth = constraints.maxWidth;
+                    final barWidth = (fullWidth * frazione).clamp(0.0, fullWidth);
+                    return Stack(
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        // Binario di sfondo sottile.
+                        Container(
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEDF1F5),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                        ),
+                        // Se 0 -> pallino blu all'inizio; altrimenti barra che cresce.
+                        if (val == 0)
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: primaryBlue,
+                              shape: BoxShape.circle,
+                            ),
+                          )
+                        else
+                          Container(
+                            height: 10,
+                            width: barWidth,
+                            decoration: BoxDecoration(
+                              color: primaryBlue,
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 26,
+                child: Text(
+                  '$val',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  f['filtro']?.toString() ?? '-',
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  style: TextStyle(fontSize: 11, color: Colors.grey[700]),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 

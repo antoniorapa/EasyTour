@@ -8,23 +8,11 @@ import 'services/session_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  final bool isLoggedIn = await SessionService.loadSession();
-
-  runApp(
-    EasyTourApp(
-      isLoggedIn: isLoggedIn,
-    ),
-  );
+  runApp(const EasyTourApp());
 }
 
 class EasyTourApp extends StatelessWidget {
-  final bool isLoggedIn;
-
-  const EasyTourApp({
-    super.key,
-    required this.isLoggedIn,
-  });
+  const EasyTourApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -33,12 +21,10 @@ class EasyTourApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: const Color(0xFF2F5597),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2F5597),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F5597)),
         useMaterial3: true,
       ),
-      home: isLoggedIn ? const SessionRedirectPage() : const SplashPage(),
+      home: const SplashPage(),
     );
   }
 }
