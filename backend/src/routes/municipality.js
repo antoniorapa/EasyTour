@@ -1,10 +1,15 @@
 const express = require('express');
-const axios = require('axios');
 const { driver } = require('../db');
 
 const router = express.Router();
 
 function neo4jNumberToJs(value) {
+  if (value === null || value === undefined) return 0;
+
+  if (typeof value === 'number') {
+    return value;
+  }
+
   if (value && typeof value.toNumber === 'function') {
     return value.toNumber();
   }
@@ -13,11 +18,26 @@ function neo4jNumberToJs(value) {
     return value.low;
   }
 
-  return value;
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function neo4jDateToString(value) {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value.toString === 'function') {
+    return value.toString();
+  }
+
+  return null;
 }
 
 function normalizeText(value) {
-  return value
+  return (value || '')
     .toString()
     .trim()
     .toLowerCase()
@@ -30,56 +50,67 @@ function normalizeText(value) {
     .replaceAll('ù', 'u');
 }
 
-function normalizeMunicipality(record) {
-  const municipality = record.get('municipality');
-  const subscription = record.get('subscription');
+function isTrue(value) {
+  return value === true || value === 'true';
+}
 
-  const m = municipality.properties;
-  const s = subscription ? subscription.properties : null;
+function normalizeMunicipalityFromProperties(m) {
+  const servizioAttivo =
+    isTrue(m.servizioAttivo) || m.statoServizio === 'ATTIVO';
 
-  const subscriptionActive = s?.stato === 'ATTIVO';
-  const municipalityActive = m.statoServizio === 'ATTIVO';
+  const metodoPagamentoConfigurato =
+    isTrue(m.metodoPagamentoConfigurato) ||
+    Boolean(m.metodoPagamento && m.metodoPagamento.toString().trim() !== '');
+
+  const active = servizioAttivo && metodoPagamentoConfigurato;
 
   return {
     id: m.id,
     nome: m.nome,
     provincia: m.provincia || '',
     regione: m.regione || '',
-    statoServizio: m.statoServizio || 'NON_ATTIVO',
+
     latitudine: Number(neo4jNumberToJs(m.latitudine) || 0),
     longitudine: Number(neo4jNumberToJs(m.longitudine) || 0),
-    subscription: s
-      ? {
-          piano: s.piano,
-          stato: s.stato,
-          metodoPagamento: s.metodoPagamento,
-          dataInizio: s.dataInizio?.toString?.() || null,
-          dataFine: s.dataFine?.toString?.() || null,
-        }
-      : null,
-    active: municipalityActive && subscriptionActive,
+
+    codiceAttivazione: m.codiceAttivazione || null,
+
+    servizioAttivo,
+    metodoPagamentoConfigurato,
+    metodoPagamento: m.metodoPagamento || null,
+    dataAttivazioneServizio: neo4jDateToString(m.dataAttivazioneServizio),
+
+    statoServizio: active ? 'ATTIVO' : 'NON_ATTIVO',
+
+    active,
   };
 }
 
+function normalizeMunicipality(record) {
+  const municipalityNode = record.get('municipality');
+
+  if (!municipalityNode) {
+    return null;
+  }
+
+  return normalizeMunicipalityFromProperties(municipalityNode.properties);
+}
+
 async function findMunicipalityInNeo4jByName(query) {
-  const session = driver.session();
+  const session = driver.session({
+    database: process.env.NEO4J_DATABASE,
+  });
 
   const cleanedQuery = normalizeText(query);
 
   try {
-    /*
-      Prima cerchiamo una corrispondenza esatta sul nome normalizzato.
-      Poi, se non esiste, accettiamo un match parziale.
-      Questo evita che la ricerca restituisca sempre un Comune sbagliato.
-    */
     const result = await session.run(
       `
       MATCH (m:Municipality)
-      OPTIONAL MATCH (m)-[:HAS_SUBSCRIPTION]->(s:Subscription)
-      WITH m, s,
+      WITH m,
            toLower(m.nome) AS nomeLower,
            toLower($query) AS queryLower
-      WITH m, s, nomeLower, queryLower,
+      WITH m, nomeLower, queryLower,
            CASE
              WHEN nomeLower = queryLower THEN 0
              WHEN nomeLower STARTS WITH queryLower THEN 1
@@ -88,13 +119,13 @@ async function findMunicipalityInNeo4jByName(query) {
              ELSE 99
            END AS score
       WHERE score < 99
-      RETURN m AS municipality, s AS subscription, score
+      RETURN m AS municipality, score
       ORDER BY score ASC, size(m.nome) ASC
       LIMIT 1
       `,
       {
         query: cleanedQuery,
-      },
+      }
     );
 
     if (result.records.length === 0) {
@@ -107,103 +138,18 @@ async function findMunicipalityInNeo4jByName(query) {
   }
 }
 
-function extractMunicipalityNameFromGeocoding(results) {
-  /*
-    In Italia il Comune viene spesso restituito come
-    administrative_area_level_3.
-
-    locality può invece essere una frazione o località interna,
-    ad esempio Lancusi, Penta, ecc.
-    Per EasyTour ci interessa il Comune convenzionato.
-  */
-
-  for (const result of results) {
-    const components = result.address_components || [];
-
-    const administrativeLevel3 = components.find((component) =>
-      component.types.includes('administrative_area_level_3'),
-    );
-
-    if (administrativeLevel3) {
-      return administrativeLevel3.long_name;
-    }
-  }
-
-  for (const result of results) {
-    const components = result.address_components || [];
-
-    const locality = components.find((component) =>
-      component.types.includes('locality'),
-    );
-
-    if (locality) {
-      return locality.long_name;
-    }
-  }
-
-  for (const result of results) {
-    const components = result.address_components || [];
-
-    const administrativeLevel2 = components.find((component) =>
-      component.types.includes('administrative_area_level_2'),
-    );
-
-    if (administrativeLevel2) {
-      return administrativeLevel2.long_name;
-    }
-  }
-
-  return null;
-}
-
-router.get('/search', async (req, res) => {
-  const query = req.query.q;
-
-  if (!query) {
-    return res.status(400).json({
-      message: 'Parametro q mancante',
-    });
-  }
-
-  try {
-    const municipality = await findMunicipalityInNeo4jByName(query);
-
-    if (!municipality) {
-      return res.json({
-        found: false,
-        active: false,
-        message: 'Comune non presente nella piattaforma EasyTour',
-      });
-    }
-
-    return res.json({
-      found: true,
-      ...municipality,
-      message: municipality.active
-        ? 'Comune attivo'
-        : 'Comune presente ma non attivo',
-    });
-  } catch (error) {
-    console.error('Errore ricerca Comune:', error);
-
-    return res.status(500).json({
-      message: 'Errore nella ricerca del Comune',
-      error: error.message,
-    });
-  }
-});
 function toRadians(degrees) {
-  return degrees * Math.PI / 180;
+  return (degrees * Math.PI) / 180;
 }
 
 function calculateDistanceKm(lat1, lon1, lat2, lon2) {
   const earthRadiusKm = 6371;
 
-  const dLat = toRadians(lat2 - lat1);
-  const dLon = toRadians(lon2 - lon1);
+  const dLat = toRadians(Number(lat2) - Number(lat1));
+  const dLon = toRadians(Number(lon2) - Number(lon1));
 
-  const rLat1 = toRadians(lat1);
-  const rLat2 = toRadians(lat2);
+  const rLat1 = toRadians(Number(lat1));
+  const rLat2 = toRadians(Number(lat2));
 
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -216,80 +162,132 @@ function calculateDistanceKm(lat1, lon1, lat2, lon2) {
 
   return earthRadiusKm * c;
 }
+
+/*
+  GET /municipality/search?q=Napoli
+
+  Restituisce il Comune anche se non è attivo.
+  Il frontend deve usare active/servizioAttivo per decidere se bloccare le funzioni.
+*/
+router.get('/search', async (req, res) => {
+  const query = req.query.q;
+
+  if (!query) {
+    return res.status(400).json({
+      found: false,
+      active: false,
+      servizioAttivo: false,
+      message: 'Parametro q mancante',
+    });
+  }
+
+  try {
+    const municipality = await findMunicipalityInNeo4jByName(query);
+
+    if (!municipality) {
+      return res.json({
+        found: false,
+        active: false,
+        servizioAttivo: false,
+        metodoPagamentoConfigurato: false,
+        message: 'Comune non presente nella piattaforma EasyTour',
+      });
+    }
+
+    return res.json({
+      found: true,
+      ...municipality,
+      message: municipality.active
+        ? 'Comune attivo'
+        : 'Comune presente nella piattaforma, ma il servizio non è ancora attivo',
+    });
+  } catch (error) {
+    console.error('Errore ricerca Comune:', error);
+
+    return res.status(500).json({
+      found: false,
+      active: false,
+      servizioAttivo: false,
+      message: 'Errore nella ricerca del Comune',
+      error: error.message,
+    });
+  }
+});
+
+/*
+  GET /municipality/check-point?lat=...&lng=...
+
+  Cerca il Comune più vicino al punto scelto.
+  Restituisce anche se non attivo, ma active=false.
+*/
 router.get('/check-point', async (req, res) => {
   const lat = Number(req.query.lat);
   const lng = Number(req.query.lng);
 
-  if (!lat || !lng) {
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
     return res.status(400).json({
+      found: false,
+      active: false,
+      servizioAttivo: false,
       message: 'Parametri lat e lng obbligatori',
     });
   }
 
-  const session = driver.session();
+  const session = driver.session({
+    database: process.env.NEO4J_DATABASE,
+  });
 
   try {
     const result = await session.run(
       `
       MATCH (m:Municipality)
-      OPTIONAL MATCH (m)-[:HAS_SUBSCRIPTION]->(s:Subscription)
       WHERE m.latitudine IS NOT NULL
         AND m.longitudine IS NOT NULL
-      RETURN m AS municipality, s AS subscription
-      `,
+      RETURN m AS municipality
+      `
     );
 
     if (result.records.length === 0) {
       return res.json({
         found: false,
         active: false,
+        servizioAttivo: false,
         message: 'Nessun Comune EasyTour ha coordinate registrate.',
       });
     }
 
-    const municipalities = result.records.map((record) => {
-      const municipality = normalizeMunicipality(record);
+    const municipalities = result.records
+      .map((record) => normalizeMunicipality(record))
+      .filter((municipality) => municipality !== null)
+      .map((municipality) => {
+        const distanceKm = calculateDistanceKm(
+          lat,
+          lng,
+          municipality.latitudine,
+          municipality.longitudine
+        );
 
-      const distanceKm = calculateDistanceKm(
-        lat,
-        lng,
-        municipality.latitudine,
-        municipality.longitudine,
-      );
-
-      return {
-        ...municipality,
-        distanceKm,
-      };
-    });
+        return {
+          ...municipality,
+          distanceKm,
+        };
+      });
 
     municipalities.sort((a, b) => a.distanceKm - b.distanceKm);
 
     const nearestMunicipality = municipalities[0];
 
-    /*
-      Soglia prototipo:
-      se il punto selezionato è entro 8 km dal centro del Comune,
-      lo consideriamo appartenente a quel Comune.
-
-      Puoi aumentare a 10/12 km per Comuni più grandi.
-      Per Roma conviene almeno 20/25 km.
-    */
     const maxDistanceFromMunicipalityCenterKm =
       nearestMunicipality.nome === 'Roma' ? 25 : 8;
 
-    if (
-      nearestMunicipality.distanceKm >
-      maxDistanceFromMunicipalityCenterKm
-    ) {
+    if (nearestMunicipality.distanceKm > maxDistanceFromMunicipalityCenterKm) {
       return res.json({
         found: false,
         active: false,
+        servizioAttivo: false,
         detectedMunicipalityName: null,
         nearestMunicipalityName: nearestMunicipality.nome,
-        nearestDistanceKm: Number(
-          nearestMunicipality.distanceKm.toFixed(2),
-        ),
+        nearestDistanceKm: Number(nearestMunicipality.distanceKm.toFixed(2)),
         message:
           `Il punto selezionato non rientra in un Comune EasyTour. ` +
           `Il Comune registrato più vicino è ${nearestMunicipality.nome}, ` +
@@ -304,12 +302,15 @@ router.get('/check-point', async (req, res) => {
       ...nearestMunicipality,
       message: nearestMunicipality.active
         ? `Il punto selezionato rientra nell'area del Comune attivo di ${nearestMunicipality.nome}.`
-        : `Il punto selezionato rientra nell'area del Comune di ${nearestMunicipality.nome}, ma il Comune non ha un abbonamento attivo.`,
+        : `Il punto selezionato rientra nell'area del Comune di ${nearestMunicipality.nome}, ma il servizio EasyTour non è ancora attivo.`,
     });
   } catch (error) {
     console.error('Errore check-point Comune:', error);
 
     return res.status(500).json({
+      found: false,
+      active: false,
+      servizioAttivo: false,
       message: 'Errore nel controllo del punto selezionato',
       error: error.message,
     });
@@ -318,28 +319,35 @@ router.get('/check-point', async (req, res) => {
   }
 });
 
+/*
+  GET /municipality/:municipalityId/status
+
+  Verifica lo stato del Comune.
+*/
 router.get('/:municipalityId/status', async (req, res) => {
   const { municipalityId } = req.params;
 
-  const session = driver.session();
+  const session = driver.session({
+    database: process.env.NEO4J_DATABASE,
+  });
 
   try {
     const result = await session.run(
       `
       MATCH (m:Municipality {id: $municipalityId})
-      OPTIONAL MATCH (m)-[:HAS_SUBSCRIPTION]->(s:Subscription)
-      RETURN m AS municipality, s AS subscription
+      RETURN m AS municipality
       LIMIT 1
       `,
       {
         municipalityId,
-      },
+      }
     );
 
     if (result.records.length === 0) {
       return res.status(404).json({
         found: false,
         active: false,
+        servizioAttivo: false,
         message: 'Comune non trovato',
       });
     }
@@ -349,14 +357,15 @@ router.get('/:municipalityId/status', async (req, res) => {
     return res.json({
       found: true,
       ...municipality,
-      message: municipality.active
-        ? 'Comune attivo'
-        : 'Comune non attivo',
+      message: municipality.active ? 'Comune attivo' : 'Comune non attivo',
     });
   } catch (error) {
     console.error('Errore stato Comune:', error);
 
     return res.status(500).json({
+      found: false,
+      active: false,
+      servizioAttivo: false,
       message: 'Errore nella verifica del Comune',
       error: error.message,
     });

@@ -1,7 +1,5 @@
 import 'dart:math';
 
-import '../widgets/easytour_header.dart';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -11,9 +9,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/itinerary_stop.dart';
 import '../models/place.dart';
 import '../services/api_service.dart';
+import '../services/session_service.dart';
+import '../widgets/easytour_header.dart';
 import 'generated_itinerary_page.dart';
-import 'place_detail_page.dart';
 import 'login_page.dart';
+import 'place_detail_page.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -94,8 +94,47 @@ class _SearchPageState extends State<SearchPage> {
         (selectedLatitude != null && selectedLongitude != null);
   }
 
-  Future<void> _showComuneNonPresentePopup() async {
+  bool _isMunicipalityActive(Map<String, dynamic> data) {
+    if (data['active'] is bool) {
+      return data['active'] == true;
+    }
+
+    final servizioAttivo = data['servizioAttivo'] == true;
+    final metodoPagamentoConfigurato =
+        data['metodoPagamentoConfigurato'] == true;
+
+    return servizioAttivo && metodoPagamentoConfigurato;
+  }
+
+  String _municipalityBlockedMessage({
+    required bool found,
+    String? municipalityName,
+  }) {
+    if (!found) {
+      return 'Il Comune selezionato non è presente nella piattaforma EasyTour.';
+    }
+
+    final name = municipalityName == null || municipalityName.isEmpty
+        ? 'questo Comune'
+        : municipalityName;
+
+    return '$name è presente nella piattaforma, ma il servizio EasyTour non è ancora attivo. Le funzionalità saranno disponibili dopo l’attivazione da parte del Comune.';
+  }
+
+  Future<void> _showMunicipalityBlockedPopup({
+    required bool found,
+    String? municipalityName,
+  }) async {
     if (!mounted) return;
+
+    final title = found
+        ? 'Comune non ancora attivo'
+        : 'Comune non presente nell’app';
+
+    final message = _municipalityBlockedMessage(
+      found: found,
+      municipalityName: municipalityName,
+    );
 
     await showDialog<void>(
       context: context,
@@ -104,16 +143,14 @@ class _SearchPageState extends State<SearchPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
           ),
-          title: const Text(
-            'Comune non presente nell’app',
-            style: TextStyle(
+          title: Text(
+            title,
+            style: const TextStyle(
               color: darkBlue,
               fontWeight: FontWeight.w800,
             ),
           ),
-          content: const Text(
-            'Il Comune selezionato non è presente nell’app. Non puoi accedere alle funzionalità di EasyTour.',
-          ),
+          content: Text(message),
           actions: [
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -158,7 +195,7 @@ class _SearchPageState extends State<SearchPage> {
       selectedLatitude = null;
       selectedLongitude = null;
       searchCenterLabel = 'Verifica Comune...';
-      searchMode = 'Verifica iscrizione';
+      searchMode = 'Verifica servizio';
       locationMessage = 'Verifico se il Comune è attivo su EasyTour...';
     });
 
@@ -166,7 +203,10 @@ class _SearchPageState extends State<SearchPage> {
       final municipality = await apiService.searchMunicipalityByName(query);
 
       final bool found = municipality['found'] == true;
-      final bool active = municipality['active'] == true;
+      final bool active = _isMunicipalityActive(municipality);
+
+      final municipalityName =
+          municipality['nome']?.toString() ?? query;
 
       if (!found || !active) {
         if (!mounted) return;
@@ -174,44 +214,84 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {
           municipalitySelected = found;
           municipalityActive = false;
+
           selectedMunicipalityId = municipality['id']?.toString();
-          selectedMunicipalityName = municipality['nome']?.toString();
-          cityController.text = municipality['nome']?.toString() ?? query;
+          selectedMunicipalityName = found ? municipalityName : null;
+
+          cityController.text = found ? municipalityName : query;
+
+          selectedLatitude = null;
+          selectedLongitude = null;
 
           places = [];
           allGooglePlaces = [];
 
-          searchCenterLabel = 'Comune non disponibile';
-          searchMode = 'Comune non presente nell’app';
+          searchCenterLabel = found
+              ? '$municipalityName non attivo'
+              : 'Comune non disponibile';
 
-          errorMessage = 'Comune non presente nell’app.';
-          locationMessage =
-          'Comune non presente nell’app: mappa, attrazioni e itinerari sono bloccati.';
+          searchMode = found
+              ? 'Servizio non attivo'
+              : 'Comune non presente';
+
+          errorMessage = _municipalityBlockedMessage(
+            found: found,
+            municipalityName: municipalityName,
+          );
+
+          locationMessage = errorMessage;
         });
 
-        await _showComuneNonPresentePopup();
+        await _showMunicipalityBlockedPopup(
+          found: found,
+          municipalityName: municipalityName,
+        );
+
         return;
       }
 
       final lat = _toDouble(municipality['latitudine']);
       final lng = _toDouble(municipality['longitudine']);
-      final municipalityName = municipality['nome']?.toString() ?? query;
+
+      if (lat == 0 || lng == 0) {
+        if (!mounted) return;
+
+        setState(() {
+          municipalitySelected = true;
+          municipalityActive = false;
+          selectedMunicipalityId = municipality['id']?.toString();
+          selectedMunicipalityName = municipalityName;
+          errorMessage =
+          'Il Comune è attivo, ma non ha coordinate valide nel database.';
+          locationMessage =
+          'Impossibile usare questo Comune perché mancano le coordinate.';
+          searchCenterLabel = municipalityName;
+          searchMode = 'Coordinate mancanti';
+        });
+
+        return;
+      }
 
       if (!mounted) return;
 
       setState(() {
         municipalitySelected = true;
         municipalityActive = true;
+
         selectedMunicipalityId = municipality['id']?.toString();
         selectedMunicipalityName = municipalityName;
+
         selectedLatitude = lat;
         selectedLongitude = lng;
+
         usingRealLocation = false;
         isSelectingPoint = false;
+
         selectedFilter = 'none';
         searchCenterLabel = municipalityName;
         searchMode = 'Centro Comune';
         cityController.text = municipalityName;
+
         locationMessage =
         'Comune attivo. Ricerca basata sul centro di $municipalityName.';
       });
@@ -221,6 +301,10 @@ class _SearchPageState extends State<SearchPage> {
       if (!mounted) return;
 
       setState(() {
+        municipalitySelected = false;
+        municipalityActive = false;
+        places = [];
+        allGooglePlaces = [];
         errorMessage = 'Errore durante la verifica del Comune: $e';
         locationMessage = 'Impossibile verificare il Comune.';
       });
@@ -265,7 +349,12 @@ class _SearchPageState extends State<SearchPage> {
       );
 
       final bool found = municipalityCheck['found'] == true;
-      final bool active = municipalityCheck['active'] == true;
+      final bool active = _isMunicipalityActive(municipalityCheck);
+
+      final municipalityName =
+          municipalityCheck['nome']?.toString() ??
+              municipalityCheck['detectedMunicipalityName']?.toString() ??
+              'Comune selezionato';
 
       if (!found || !active) {
         if (!mounted) return;
@@ -275,7 +364,7 @@ class _SearchPageState extends State<SearchPage> {
           municipalityActive = false;
 
           selectedMunicipalityId = municipalityCheck['id']?.toString();
-          selectedMunicipalityName = municipalityCheck['nome']?.toString();
+          selectedMunicipalityName = found ? municipalityName : null;
 
           places = [];
           allGooglePlaces = [];
@@ -283,27 +372,37 @@ class _SearchPageState extends State<SearchPage> {
           usingRealLocation = false;
           isSelectingPoint = false;
 
-          searchCenterLabel = 'Comune non disponibile';
-          searchMode = 'Posizione attuale non valida';
+          searchCenterLabel = found
+              ? '$municipalityName non attivo'
+              : 'Comune non disponibile';
 
-          errorMessage = 'Comune non presente nell’app.';
-          locationMessage =
-          'Comune non presente nell’app: non puoi accedere alle funzionalità.';
+          searchMode = found
+              ? 'Servizio non attivo'
+              : 'Posizione non valida';
+
+          errorMessage = _municipalityBlockedMessage(
+            found: found,
+            municipalityName: municipalityName,
+          );
+
+          locationMessage = errorMessage;
         });
 
-        await _showComuneNonPresentePopup();
+        await _showMunicipalityBlockedPopup(
+          found: found,
+          municipalityName: municipalityName,
+        );
+
         return;
       }
 
       final newMunicipalityId = municipalityCheck['id']?.toString();
-      final newMunicipalityName =
-          municipalityCheck['nome']?.toString() ?? 'Comune attivo';
 
       if (!mounted) return;
 
       setState(() {
         selectedMunicipalityId = newMunicipalityId;
-        selectedMunicipalityName = newMunicipalityName;
+        selectedMunicipalityName = municipalityName;
 
         municipalitySelected = true;
         municipalityActive = true;
@@ -318,10 +417,10 @@ class _SearchPageState extends State<SearchPage> {
         searchCenterLabel = 'La tua posizione';
 
         selectedFilter = 'none';
-        cityController.text = newMunicipalityName;
+        cityController.text = municipalityName;
 
         locationMessage =
-        'Ricerca basata sulla tua posizione attuale nel Comune attivo: $newMunicipalityName.';
+        'Ricerca basata sulla tua posizione attuale nel Comune attivo: $municipalityName.';
       });
 
       await refreshPlaces();
@@ -361,7 +460,7 @@ class _SearchPageState extends State<SearchPage> {
       searchCenterLabel = 'Seleziona un punto';
       searchMode = 'Scelta sulla mappa';
       locationMessage =
-      'Muovi la mappa e tocca un punto. Controlleremo se appartiene a un Comune presente nell’app.';
+      'Muovi la mappa e tocca un punto. Controlleremo se appartiene a un Comune presente e attivo su EasyTour.';
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -526,7 +625,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void applyFilter(String filterType) {
-    if (!canUseApp) return;
+    if (!canUseApp) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Prima seleziona un Comune attivo.'),
+        ),
+      );
+      return;
+    }
 
     setState(() {
       selectedFilter = filterType;
@@ -582,7 +688,12 @@ class _SearchPageState extends State<SearchPage> {
       );
 
       final bool found = municipalityCheck['found'] == true;
-      final bool active = municipalityCheck['active'] == true;
+      final bool active = _isMunicipalityActive(municipalityCheck);
+
+      final municipalityName =
+          municipalityCheck['nome']?.toString() ??
+              municipalityCheck['detectedMunicipalityName']?.toString() ??
+              'Comune selezionato';
 
       if (!found || !active) {
         if (!mounted) return;
@@ -592,7 +703,7 @@ class _SearchPageState extends State<SearchPage> {
           selectedLongitude = point.longitude;
 
           selectedMunicipalityId = municipalityCheck['id']?.toString();
-          selectedMunicipalityName = municipalityCheck['nome']?.toString();
+          selectedMunicipalityName = found ? municipalityName : null;
 
           municipalitySelected = found;
           municipalityActive = false;
@@ -603,27 +714,38 @@ class _SearchPageState extends State<SearchPage> {
           places = [];
           allGooglePlaces = [];
 
-          searchCenterLabel = 'Comune non disponibile';
-          searchMode = 'Punto non valido';
+          searchCenterLabel = found
+              ? '$municipalityName non attivo'
+              : 'Comune non disponibile';
 
-          errorMessage = 'Comune non presente nell’app.';
+          searchMode = found
+              ? 'Servizio non attivo'
+              : 'Punto non valido';
+
+          errorMessage = _municipalityBlockedMessage(
+            found: found,
+            municipalityName: municipalityName,
+          );
+
           locationMessage =
-          'Comune non presente nell’app: scegli un altro punto oppure inserisci un Comune diverso.';
+          '$errorMessage Scegli un altro punto oppure inserisci un Comune diverso.';
         });
 
-        await _showComuneNonPresentePopup();
+        await _showMunicipalityBlockedPopup(
+          found: found,
+          municipalityName: municipalityName,
+        );
+
         return;
       }
 
       if (!mounted) return;
 
       final newMunicipalityId = municipalityCheck['id']?.toString();
-      final newMunicipalityName =
-          municipalityCheck['nome']?.toString() ?? 'Comune attivo';
 
       setState(() {
         selectedMunicipalityId = newMunicipalityId;
-        selectedMunicipalityName = newMunicipalityName;
+        selectedMunicipalityName = municipalityName;
 
         municipalitySelected = true;
         municipalityActive = true;
@@ -639,10 +761,10 @@ class _SearchPageState extends State<SearchPage> {
 
         selectedFilter = 'none';
 
-        cityController.text = newMunicipalityName;
+        cityController.text = municipalityName;
 
         locationMessage =
-        'Ricerca basata sul punto selezionato nel Comune attivo: $newMunicipalityName.';
+        'Ricerca basata sul punto selezionato nel Comune attivo: $municipalityName.';
       });
 
       await refreshPlaces();
@@ -681,7 +803,9 @@ class _SearchPageState extends State<SearchPage> {
     if (!canUseApp) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Prima cerca un Comune attivo.'),
+          content: Text(
+            'Prima seleziona un Comune attivo. Le funzionalità sono bloccate per i Comuni non ancora attivati.',
+          ),
         ),
       );
       return;
@@ -797,6 +921,8 @@ class _SearchPageState extends State<SearchPage> {
     required int numeroGiorni,
     required int oreDisponibiliAlGiorno,
   }) async {
+    if (!canUseApp) return;
+
     setState(() {
       isGeneratingItinerary = true;
     });
@@ -917,11 +1043,16 @@ class _SearchPageState extends State<SearchPage> {
     final category = place.categoria.toLowerCase();
 
     if (category.contains('museum')) return 60;
+    if (category.contains('museo')) return 60;
     if (category.contains('castle')) return 60;
+    if (category.contains('castello')) return 60;
     if (category.contains('church')) return 45;
+    if (category.contains('chiesa')) return 45;
     if (category.contains('historical')) return 45;
+    if (category.contains('storico')) return 45;
     if (category.contains('landmark')) return 45;
     if (category.contains('park')) return 40;
+    if (category.contains('parco')) return 40;
     if (category.contains('garden')) return 40;
     if (category.contains('tourist attraction')) return 40;
 
@@ -1167,6 +1298,17 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  Future<void> _logout() async {
+    await SessionService.logout();
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+          (_) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1176,14 +1318,10 @@ class _SearchPageState extends State<SearchPage> {
           Column(
             children: [
               EasyTourHeader(
-                              showBack: true,
-                              showLogout: true,
-                              onLogoutTap: () {
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                                );
-                              },
-                            ),
+                showBack: true,
+                showLogout: true,
+                onLogoutTap: _logout,
+              ),
               Expanded(
                 child: RefreshIndicator(
                   color: primaryBlue,
@@ -1202,8 +1340,7 @@ class _SearchPageState extends State<SearchPage> {
                       if (canShowMap) _buildMapCard(),
                       if (canUseApp) _buildPlacesHeader(),
                       if (canUseApp) _buildPlacesList(),
-                      if (!canUseApp && !isSelectingPoint)
-                        _buildBlockedState(),
+                      if (!canUseApp && !isSelectingPoint) _buildBlockedState(),
                       if (!canUseApp && isSelectingPoint)
                         _buildMapSelectionHint(),
                       const SizedBox(height: 110),
@@ -1260,7 +1397,7 @@ class _SearchPageState extends State<SearchPage> {
             TextField(
               controller: cityController,
               decoration: _inputDecoration('Cerca Comune').copyWith(
-                hintText: 'Es. Fisciano, Roma, Salerno...',
+                hintText: 'Es. Napoli, Roma, Salerno...',
                 prefixIcon: const Icon(Icons.location_city, color: primaryBlue),
                 suffixIcon: IconButton(
                   icon: isLoading && !canUseApp
@@ -1334,8 +1471,9 @@ class _SearchPageState extends State<SearchPage> {
                               ? const SizedBox(
                             height: 17,
                             width: 17,
-                            child:
-                            CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
                           )
                               : const Icon(
                             Icons.search,
@@ -1974,6 +2112,8 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildBlockedState() {
+    final hasRealError = errorMessage != null && errorMessage!.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: Container(
@@ -1996,14 +2136,14 @@ class _SearchPageState extends State<SearchPage> {
               height: 64,
               width: 64,
               decoration: BoxDecoration(
-                color: errorMessage == null ? softBlue : softOrange,
+                color: hasRealError ? softOrange : softBlue,
                 borderRadius: BorderRadius.circular(22),
               ),
               child: Icon(
-                errorMessage == null
-                    ? Icons.travel_explore_rounded
-                    : Icons.lock_outline_rounded,
-                color: errorMessage == null ? primaryBlue : orange,
+                hasRealError
+                    ? Icons.lock_outline_rounded
+                    : Icons.travel_explore_rounded,
+                color: hasRealError ? orange : primaryBlue,
                 size: 34,
               ),
             ),
@@ -2013,7 +2153,7 @@ class _SearchPageState extends State<SearchPage> {
                   'Scegli una modalità per iniziare: posizione attuale, punto sulla mappa oppure cerca un Comune dal campo in alto.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: errorMessage == null ? darkBlue : Colors.redAccent,
+                color: hasRealError ? Colors.redAccent : darkBlue,
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
                 height: 1.35,
@@ -2021,7 +2161,7 @@ class _SearchPageState extends State<SearchPage> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'La mappa, le attrazioni e gli itinerari saranno disponibili solo nei Comuni presenti nell’app.',
+              'La mappa, le attrazioni e gli itinerari saranno disponibili solo nei Comuni presenti e attivi su EasyTour.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.black54,
@@ -2046,7 +2186,7 @@ class _SearchPageState extends State<SearchPage> {
           borderRadius: BorderRadius.circular(22),
         ),
         child: const Text(
-          'Seleziona un punto sulla mappa. Se il Comune non è presente nell’app, comparirà un avviso.',
+          'Seleziona un punto sulla mappa. Se il Comune non è presente o non è ancora attivo, comparirà un avviso.',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: darkBlue,

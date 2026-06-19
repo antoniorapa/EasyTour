@@ -9,11 +9,6 @@ const router = express.Router();
 const SALT_ROUNDS = 10;
 const TOKEN_DURATION = '7d';
 
-/*
-  Crea il token JWT per un utente autenticato.
-  Il payload contiene solo ciò che serve al frontend e ai middleware:
-  id utente, ruolo ed email. Mai dati sensibili come la password.
-*/
 function createToken(user) {
   return jwt.sign(
     {
@@ -26,15 +21,29 @@ function createToken(user) {
   );
 }
 
+function normalizeText(value) {
+  return value ? value.toString().trim() : '';
+}
+
+function normalizeCode(value) {
+  return value ? value.toString().trim().toUpperCase() : '';
+}
+
+function isTrue(value) {
+  return value === true || value === 'true';
+}
+
 /*
   POST /auth/register/tourist
-  Registrazione del turista (Tabella 6.2 del RAD):
-  nome, email, password, accettazione condizioni.
+  Registrazione del turista.
 */
 router.post('/register/tourist', async (req, res) => {
   const { nome, email, password, accettaCondizioni } = req.body;
 
-  if (!nome || !email || !password) {
+  const cleanNome = normalizeText(nome);
+  const cleanEmail = normalizeText(email).toLowerCase();
+
+  if (!cleanNome || !cleanEmail || !password) {
     return res.status(400).json({
       message: 'Nome, email e password sono obbligatori',
     });
@@ -52,8 +61,12 @@ router.post('/register/tourist', async (req, res) => {
 
   try {
     const existing = await session.run(
-      `MATCH (u:User {email: $email}) RETURN u LIMIT 1`,
-      { email }
+      `
+      MATCH (u:User {email: $email})
+      RETURN u
+      LIMIT 1
+      `,
+      { email: cleanEmail }
     );
 
     if (existing.records.length > 0) {
@@ -72,18 +85,33 @@ router.post('/register/tourist', async (req, res) => {
         nome: $nome,
         email: $email,
         passwordHash: $passwordHash,
-        ruolo: "TURISTA"
+        ruolo: "TURISTA",
+        dataRegistrazione: datetime()
       })
       `,
-      { userId, nome, email, passwordHash }
+      {
+        userId,
+        nome: cleanNome,
+        email: cleanEmail,
+        passwordHash,
+      }
     );
 
-    const user = { id: userId, email, ruolo: 'TURISTA' };
+    const user = {
+      id: userId,
+      email: cleanEmail,
+      ruolo: 'TURISTA',
+    };
 
     return res.status(201).json({
       message: 'Registrazione turista completata',
       token: createToken(user),
-      user: { id: userId, nome, email, ruolo: 'TURISTA' },
+      user: {
+        id: userId,
+        nome: cleanNome,
+        email: cleanEmail,
+        ruolo: 'TURISTA',
+      },
     });
   } catch (error) {
     console.error('Errore registrazione turista:', error);
@@ -99,12 +127,14 @@ router.post('/register/tourist', async (req, res) => {
 
 /*
   POST /auth/register/municipality
-  Registrazione dell'operatore comunale (Tabella 6.2 del RAD):
-  nome referente, email istituzionale, password, nome Comune,
-  ruolo referente, metodo di pagamento, accettazione condizioni.
 
-  L'operatore viene collegato al Comune tramite (u)-[:MANAGES]->(m).
-  Il Comune deve già esistere nella piattaforma.
+  Logica:
+  - Il Comune deve già esistere in Neo4j.
+  - Il codiceAttivazione deve essere corretto.
+  - Se il Comune non è ancora attivo, il primo operatore deve inserire
+    il metodo di pagamento del Comune.
+  - Dopo la prima registrazione, il Comune diventa servizioAttivo = true.
+  - Gli operatori successivi possono registrarsi senza reinserire il pagamento.
 */
 router.post('/register/municipality', async (req, res) => {
   const {
@@ -118,7 +148,20 @@ router.post('/register/municipality', async (req, res) => {
     accettaCondizioni,
   } = req.body;
 
-  if (!nome || !email || !password || !nomeComune || !codiceAttivazione) {
+  const cleanNome = normalizeText(nome);
+  const cleanEmail = normalizeText(email).toLowerCase();
+  const cleanNomeComune = normalizeText(nomeComune);
+  const cleanCodiceAttivazione = normalizeCode(codiceAttivazione);
+  const cleanRuoloReferente = normalizeText(ruoloReferente);
+  const cleanMetodoPagamento = normalizeText(metodoPagamento);
+
+  if (
+    !cleanNome ||
+    !cleanEmail ||
+    !password ||
+    !cleanNomeComune ||
+    !cleanCodiceAttivazione
+  ) {
     return res.status(400).json({
       message:
         'Nome referente, email, password, nome del Comune e codice di attivazione sono obbligatori',
@@ -137,8 +180,12 @@ router.post('/register/municipality', async (req, res) => {
 
   try {
     const existing = await session.run(
-      `MATCH (u:User {email: $email}) RETURN u LIMIT 1`,
-      { email }
+      `
+      MATCH (u:User {email: $email})
+      RETURN u
+      LIMIT 1
+      `,
+      { email: cleanEmail }
     );
 
     if (existing.records.length > 0) {
@@ -147,10 +194,14 @@ router.post('/register/municipality', async (req, res) => {
       });
     }
 
-    // Il Comune deve essere già presente nella piattaforma.
     const municipalityResult = await session.run(
-      `MATCH (m:Municipality) WHERE toLower(m.nome) = toLower($nomeComune) RETURN m LIMIT 1`,
-      { nomeComune }
+      `
+      MATCH (m:Municipality)
+      WHERE toLower(m.nome) = toLower($nomeComune)
+      RETURN m
+      LIMIT 1
+      `,
+      { nomeComune: cleanNomeComune }
     );
 
     if (municipalityResult.records.length === 0) {
@@ -162,17 +213,26 @@ router.post('/register/municipality', async (req, res) => {
 
     const municipalityNode = municipalityResult.records[0].get('m').properties;
     const municipalityId = municipalityNode.id;
+    const codiceDb = normalizeCode(municipalityNode.codiceAttivazione);
 
-    // Verifica del codice di attivazione: deve combaciare con quello
-    // segreto del Comune. Impedisce a chiunque di registrarsi come
-    // operatore di un Comune senza esserne autorizzato.
-    if (
-      !municipalityNode.codiceAttivazione ||
-      municipalityNode.codiceAttivazione !== codiceAttivazione
-    ) {
+    if (!codiceDb || codiceDb !== cleanCodiceAttivazione) {
       return res.status(403).json({
+        message: 'Codice di attivazione non valido per il Comune indicato.',
+      });
+    }
+
+    const servizioAttivo = isTrue(municipalityNode.servizioAttivo);
+    const metodoPagamentoConfigurato = isTrue(
+      municipalityNode.metodoPagamentoConfigurato
+    );
+
+    const comuneGiaAttivo =
+      servizioAttivo === true && metodoPagamentoConfigurato === true;
+
+    if (!comuneGiaAttivo && !cleanMetodoPagamento) {
+      return res.status(400).json({
         message:
-          'Codice di attivazione non valido per il Comune indicato.',
+          'Per attivare il servizio del Comune è necessario inserire il metodo di pagamento del Comune.',
       });
     }
 
@@ -182,6 +242,7 @@ router.post('/register/municipality', async (req, res) => {
     await session.run(
       `
       MATCH (m:Municipality {id: $municipalityId})
+
       CREATE (u:User {
         id: $userId,
         nome: $nome,
@@ -189,32 +250,63 @@ router.post('/register/municipality', async (req, res) => {
         passwordHash: $passwordHash,
         ruolo: "OPERATORE_COMUNALE",
         ruoloReferente: $ruoloReferente,
-        metodoPagamento: $metodoPagamento
+        dataRegistrazione: datetime()
       })
+
       CREATE (u)-[:MANAGES]->(m)
+
+      SET
+        m.servizioAttivo = true,
+        m.metodoPagamentoConfigurato = true,
+        m.metodoPagamento = CASE
+          WHEN m.metodoPagamento IS NULL OR m.metodoPagamento = ""
+          THEN $metodoPagamento
+          ELSE m.metodoPagamento
+        END,
+        m.dataAttivazioneServizio = CASE
+          WHEN m.dataAttivazioneServizio IS NULL
+          THEN datetime()
+          ELSE m.dataAttivazioneServizio
+        END
       `,
       {
         userId,
-        nome,
-        email,
+        nome: cleanNome,
+        email: cleanEmail,
         passwordHash,
         municipalityId,
-        ruoloReferente: ruoloReferente || '',
-        metodoPagamento: metodoPagamento || '',
+        ruoloReferente: cleanRuoloReferente,
+        metodoPagamento: cleanMetodoPagamento,
       }
     );
 
-    const user = { id: userId, email, ruolo: 'OPERATORE_COMUNALE' };
+    const user = {
+      id: userId,
+      email: cleanEmail,
+      ruolo: 'OPERATORE_COMUNALE',
+    };
+
+    const firstActivation = !comuneGiaAttivo;
 
     return res.status(201).json({
-      message: 'Registrazione operatore comunale completata',
+      message: firstActivation
+        ? 'Registrazione completata. Il servizio del Comune è stato attivato.'
+        : 'Registrazione operatore comunale completata.',
       token: createToken(user),
       user: {
         id: userId,
-        nome,
-        email,
+        nome: cleanNome,
+        email: cleanEmail,
         ruolo: 'OPERATORE_COMUNALE',
+        ruoloReferente: cleanRuoloReferente,
         municipalityId,
+        municipalityName: municipalityNode.nome,
+      },
+      municipality: {
+        id: municipalityId,
+        nome: municipalityNode.nome,
+        servizioAttivo: true,
+        metodoPagamentoConfigurato: true,
       },
     });
   } catch (error) {
@@ -231,14 +323,14 @@ router.post('/register/municipality', async (req, res) => {
 
 /*
   POST /auth/login
-  Login unico email/password (cap. 6.5 del RAD).
-  Dopo la verifica restituisce il token JWT e il ruolo,
-  così il frontend può fare il redirect all'area corretta.
+  Login unico email/password.
 */
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
-  if (!email || !password) {
+  const cleanEmail = normalizeText(email).toLowerCase();
+
+  if (!cleanEmail || !password) {
     return res.status(400).json({
       message: 'Email e password sono obbligatori',
     });
@@ -256,7 +348,7 @@ router.post('/login', async (req, res) => {
       RETURN u AS user, m AS municipality
       LIMIT 1
       `,
-      { email }
+      { email: cleanEmail }
     );
 
     if (result.records.length === 0) {
@@ -285,6 +377,10 @@ router.post('/login', async (req, res) => {
       email: userNode.email,
     };
 
+    const municipality = municipalityNode
+      ? municipalityNode.properties
+      : null;
+
     return res.json({
       message: 'Login effettuato',
       token: createToken(user),
@@ -293,8 +389,14 @@ router.post('/login', async (req, res) => {
         nome: userNode.nome,
         email: userNode.email,
         ruolo: userNode.ruolo,
-        municipalityId: municipalityNode
-          ? municipalityNode.properties.id
+        ruoloReferente: userNode.ruoloReferente || null,
+        municipalityId: municipality ? municipality.id : null,
+        municipalityName: municipality ? municipality.nome : null,
+        servizioAttivo: municipality
+          ? isTrue(municipality.servizioAttivo)
+          : null,
+        metodoPagamentoConfigurato: municipality
+          ? isTrue(municipality.metodoPagamentoConfigurato)
           : null,
       },
     });

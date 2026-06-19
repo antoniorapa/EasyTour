@@ -1,12 +1,12 @@
 import 'dart:math';
-import '../services/session_service.dart';
+import '../widgets/easytour_header.dart';
 import 'package:flutter/material.dart';
 
 import '../models/itinerary_stop.dart';
 import '../models/place.dart';
 import '../services/api_service.dart';
+import '../services/session_service.dart';
 import 'place_detail_page.dart';
-import '../widgets/easytour_header.dart';
 
 class GeneratedItineraryPage extends StatefulWidget {
   final List<ItineraryStop> initialStops;
@@ -248,8 +248,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
 
       final usedWithoutPauses = dayStops.fold<int>(
         0,
-            (sum, stop) =>
-        sum + stop.tempoArrivoStimato + stop.tempoVisitaStimato,
+            (sum, stop) => sum + stop.tempoArrivoStimato + stop.tempoVisitaStimato,
       );
 
       final remainingMinutes =
@@ -273,8 +272,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   void _removeStopById(String stopKey) {
-    if (!mounted) return;
-
     setState(() {
       stops.removeWhere((stop) => _stopKey(stop) == stopKey);
       _recalculateManualDays();
@@ -282,8 +279,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   void _moveStopUpById(String stopKey) {
-    if (!mounted) return;
-
     setState(() {
       final index = stops.indexWhere((stop) => _stopKey(stop) == stopKey);
 
@@ -303,8 +298,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   void _moveStopDownById(String stopKey) {
-    if (!mounted) return;
-
     setState(() {
       final index = stops.indexWhere((stop) => _stopKey(stop) == stopKey);
 
@@ -324,8 +317,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   void _moveStopToDay(String stopKey, int day) {
-    if (!mounted) return;
-
     setState(() {
       final index = stops.indexWhere((stop) => _stopKey(stop) == stopKey);
 
@@ -337,8 +328,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   void _addStop(Place place, int selectedDay) {
-    if (!mounted) return;
-
     final alreadyExists = stops.any((stop) => stop.place.id == place.id);
 
     if (alreadyExists) {
@@ -365,8 +354,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
 
       _recalculateManualDays();
     });
-
-    if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -593,13 +580,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     }
 
     final userId = SessionService.currentUserId;
-    final username = SessionService.currentUsername;
-
-    debugPrint('SALVATAGGIO ITINERARIO');
-    debugPrint('Session userId: $userId');
-    debugPrint('Session username: $username');
-    debugPrint('Session email: ${SessionService.currentEmail}');
-    debugPrint('Session token: ${SessionService.authToken}');
 
     if (userId == null || userId.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -624,7 +604,6 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
         filterType: widget.filterType,
         numeroGiorni: widget.numeroGiorni,
         stops: stops,
-
       );
 
       if (!mounted) return;
@@ -659,11 +638,16 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     final category = place.categoria.toLowerCase();
 
     if (category.contains('museum')) return 60;
+    if (category.contains('museo')) return 60;
     if (category.contains('castle')) return 60;
+    if (category.contains('castello')) return 60;
     if (category.contains('church')) return 45;
+    if (category.contains('chiesa')) return 45;
     if (category.contains('historical')) return 45;
+    if (category.contains('storico')) return 45;
     if (category.contains('landmark')) return 45;
     if (category.contains('park')) return 40;
+    if (category.contains('parco')) return 40;
     if (category.contains('garden')) return 40;
     if (category.contains('tourist attraction')) return 40;
 
@@ -854,10 +838,13 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildMockupHeader(),
+            EasyTourHeader(
+              showBack: true,
+              showLogout: false,
+            ),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
                 children: [
                   _buildIntroBox(),
                   const SizedBox(height: 16),
@@ -881,65 +868,26 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     );
   }
 
-  Widget _buildMockupHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: () => Navigator.pop(context),
-            icon: const Icon(
-              Icons.arrow_back_rounded,
-              color: primaryBlue,
-              size: 30,
-            ),
-          ),
-          Expanded(
-            child: Text(
-              'Itinerario a ${widget.municipalityName}',
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: primaryBlue,
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          IconButton(
-            onPressed: () {},
-            icon: const Icon(
-              Icons.notifications_none_rounded,
-              color: primaryBlue,
-              size: 30,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildIntroBox() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: softBlue,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         children: [
           Container(
-            height: 54,
-            width: 54,
+            height: 52,
+            width: 52,
             decoration: BoxDecoration(
               color: const Color(0xFFDDEBFF),
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(20),
             ),
             child: const Icon(
               Icons.auto_fix_high_rounded,
               color: primaryBlue,
-              size: 30,
+              size: 29,
             ),
           ),
           const SizedBox(width: 14),
@@ -948,7 +896,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Itinerario generato automaticamente.',
+                  'Itinerario generato automaticamente',
                   style: TextStyle(
                     color: Color(0xFF0D1B2A),
                     fontSize: 15,
@@ -977,7 +925,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 2),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: const [
           BoxShadow(
@@ -999,7 +947,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
           _statItem(
             icon: Icons.directions_walk_rounded,
             iconColor: green,
-            title: 'A piedi',
+            title: 'Arrivo',
             value: _formatMinutes(walkingMinutes),
           ),
           _verticalDivider(),
@@ -1033,9 +981,9 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
           Icon(
             icon,
             color: iconColor,
-            size: 27,
+            size: 26,
           ),
-          const SizedBox(height: 9),
+          const SizedBox(height: 8),
           Text(
             title,
             textAlign: TextAlign.center,
@@ -1047,7 +995,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 5),
           Text(
             value,
             textAlign: TextAlign.center,
@@ -1066,7 +1014,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
 
   Widget _verticalDivider() {
     return Container(
-      height: 72,
+      height: 68,
       width: 1,
       color: const Color(0xFFE2E8F0),
     );
@@ -1162,6 +1110,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                 '$day',
                 style: const TextStyle(
                   color: Colors.white,
+                  fontSize: 14,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -1226,45 +1175,23 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 52,
-            child: Column(
-              children: [
-                const SizedBox(height: 18),
-                Text(
-                  arrivalLabel,
-                  style: const TextStyle(
-                    color: primaryBlue,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                if (!isLast) ...[
-                  const Spacer(),
-                  Text(
-                    stop.tempoArrivoStimato <= 0
-                        ? ''
-                        : 'A piedi\n${stop.tempoArrivoStimato} min',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF5F6B7A),
-                      fontSize: 11,
-                      height: 1.15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-              ],
-            ),
-          ),
-          SizedBox(
             width: 38,
             child: Column(
               children: [
                 const SizedBox(height: 14),
+                Text(
+                  arrivalLabel,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: primaryBlue,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
                 Container(
-                  height: 38,
-                  width: 38,
+                  height: 27,
+                  width: 27,
                   decoration: const BoxDecoration(
                     color: primaryBlue,
                     shape: BoxShape.circle,
@@ -1274,7 +1201,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                       stop.ordine.toString(),
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 17,
+                        fontSize: 12,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -1284,13 +1211,17 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                   Expanded(
                     child: Container(
                       width: 2,
-                      color: primaryBlue,
+                      margin: const EdgeInsets.only(top: 4),
+                      decoration: BoxDecoration(
+                        color: primaryBlue.withOpacity(0.35),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 14),
@@ -1308,16 +1239,16 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     final isLast = localIndex == dayStops.length - 1;
 
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x08000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+            color: Color(0x0C000000),
+            blurRadius: 14,
+            offset: Offset(0, 7),
           ),
         ],
       ),
@@ -1325,7 +1256,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           _buildStopImage(stop.place),
-          const SizedBox(width: 10),
+          const SizedBox(width: 11),
           Expanded(
             child: InkWell(
               borderRadius: BorderRadius.circular(14),
@@ -1355,27 +1286,41 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
+                    const SizedBox(height: 5),
+                    Text(
+                      stop.place.categoria,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        _miniInfoChip(
-                          icon: Icons.directions_walk_rounded,
-                          text: '${stop.tempoArrivoStimato} min',
-                          color: green,
-                        ),
-                        _miniInfoChip(
-                          icon: Icons.schedule_rounded,
-                          text: '${stop.tempoVisitaStimato} min',
-                          color: primaryBlue,
-                        ),
-                        _miniInfoChip(
-                          icon: Icons.coffee_rounded,
-                          text: '${stop.tempoPausaStimato} min',
-                          color: orange,
-                        ),
-                      ],
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _miniInfoChip(
+                            icon: Icons.directions_walk_rounded,
+                            text: 'Arrivo ${stop.tempoArrivoStimato} min',
+                            color: green,
+                          ),
+                          const SizedBox(width: 6),
+                          _miniInfoChip(
+                            icon: Icons.schedule_rounded,
+                            text: 'Durata ${stop.tempoVisitaStimato} min',
+                            color: primaryBlue,
+                          ),
+                          const SizedBox(width: 6),
+                          _miniInfoChip(
+                            icon: Icons.coffee_rounded,
+                            text: 'Pausa ${stop.tempoPausaStimato} min',
+                            color: orange,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -1397,7 +1342,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                 icon: Icon(
                   Icons.keyboard_arrow_up_rounded,
                   color: isFirst ? Colors.black26 : primaryBlue,
-                  size: 28,
+                  size: 27,
                 ),
               ),
               IconButton(
@@ -1411,7 +1356,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                 icon: Icon(
                   Icons.keyboard_arrow_down_rounded,
                   color: isLast ? Colors.black26 : primaryBlue,
-                  size: 28,
+                  size: 27,
                 ),
               ),
               PopupMenuButton<String>(
@@ -1431,30 +1376,37 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                     int.parse(value.replaceFirst('day_', ''));
                     _moveStopToDay(_stopKey(stop), selectedDay);
                   }
+
+                  if (value == 'delete') {
+                    _removeStopById(_stopKey(stop));
+                  }
                 },
                 itemBuilder: (context) {
-                  return List.generate(widget.numeroGiorni, (dayIndex) {
-                    final selectedDay = dayIndex + 1;
+                  return [
+                    ...List.generate(widget.numeroGiorni, (dayIndex) {
+                      final selectedDay = dayIndex + 1;
 
-                    return PopupMenuItem(
-                      value: 'day_$selectedDay',
-                      child: Text('Sposta al giorno $selectedDay'),
-                    );
-                  });
+                      return PopupMenuItem(
+                        value: 'day_$selectedDay',
+                        child: Text('Sposta al giorno $selectedDay'),
+                      );
+                    }),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline_rounded,
+                            color: dangerRed,
+                          ),
+                          SizedBox(width: 8),
+                          Text('Rimuovi tappa'),
+                        ],
+                      ),
+                    ),
+                  ];
                 },
-              ),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minHeight: 30,
-                  minWidth: 30,
-                ),
-                onPressed: () => _removeStopById(_stopKey(stop)),
-                icon: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: dangerRed,
-                  size: 24,
-                ),
               ),
             ],
           ),
@@ -1516,24 +1468,24 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
             child: const Icon(
               Icons.location_on_rounded,
               color: Colors.white,
-              size: 32,
+              size: 30,
             ),
           );
         }
 
         return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: Image.network(
             imageUrl,
-            width: 74,
-            height: 74,
+            width: 76,
+            height: 76,
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) {
               return _placeholderImage(
                 child: const Icon(
                   Icons.location_on_rounded,
                   color: Colors.white,
-                  size: 32,
+                  size: 30,
                 ),
               );
             },
@@ -1545,15 +1497,15 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
 
   Widget _placeholderImage({required Widget child}) {
     return Container(
-      width: 74,
-      height: 74,
+      width: 76,
+      height: 76,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [orange, primaryBlue],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Center(child: child),
     );
