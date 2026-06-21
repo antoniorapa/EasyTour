@@ -1,31 +1,38 @@
 import 'package:flutter/material.dart';
-import 'itinerary_detail_screen.dart' show ItineraryStop;
+
+import '../services/api_service.dart';
+import '../services/session_service.dart';
 import '../widgets/easytour_header.dart';
+import 'saved_itinerary_screen.dart' show SavedItineraryStop;
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  TRAVEL DIARY SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 
 class TravelDiaryScreen extends StatefulWidget {
-  final ItineraryStop stop;
+  final SavedItineraryStop stop;
 
-  const TravelDiaryScreen({super.key, required this.stop});
+  const TravelDiaryScreen({
+    super.key,
+    required this.stop,
+  });
 
   @override
   State<TravelDiaryScreen> createState() => _TravelDiaryScreenState();
 }
 
 class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
-  // ── palette ──────────────────────────────────────────────────────────────
-  static const Color _primary = Color(0xFF1A56DB);
-  static const Color _primaryLight = Color(0xFFE8EFFD);
-  static const Color _textPrimary = Color(0xFF111827);
-  static const Color _textSecondary = Color(0xFF6B7280);
-  static const Color _divider = Color(0xFFE5E7EB);
-  static const Color _background = Color(0xFFF9FAFB);
-  static const Color _gold = Color(0xFFF59E0B);
-  static const Color _cardBg = Color(0xFFF0F4FF);
+  final ApiService _apiService = ApiService();
 
-  // ── report categories ────────────────────────────────────────────────────
+  static const Color primaryBlue = Color(0xFF005A8D);
+  static const Color darkBlue = Color(0xFF003F63);
+  static const Color orange = Color(0xFFF58A00);
+  static const Color lightBackground = Color(0xFFF7FAFC);
+  static const Color softBlue = Color(0xFFEAF4FA);
+  static const Color green = Color(0xFF00A676);
+  static const Color dangerRed = Color(0xFFE53935);
+  static const Color gold = Color(0xFFF59E0B);
+
   static const List<String> _reportCategories = [
     'Affollamento',
     'Pulizia',
@@ -36,20 +43,30 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
     'Altro',
   ];
 
-  // ── diary state ───────────────────────────────────────────────────────────
-  int _diaryRating = 4; // 0–5
-  final TextEditingController _notesCtrl = TextEditingController(
-    text: 'Posto magnifico, soprattutto la sera quando è illuminato. Atmosfera unica!',
-  );
-  final List<String> _photos = ['placeholder']; // placeholder = 1 foto già caricata
+  final TextEditingController _notesCtrl = TextEditingController();
+  final TextEditingController _reportCtrl = TextEditingController();
 
-  // ── report state ──────────────────────────────────────────────────────────
+  final List<String> _photos = [];
+
+  int _diaryRating = 0;
   String _selectedCategory = 'Affollamento';
-  final TextEditingController _reportCtrl = TextEditingController(
-    text: 'Troppa gente, mancano panchine e zone d\'attesa.',
-  );
-  bool _reportSent = false;
+
+  bool _isLoading = true;
+  bool _isSavingDiary = false;
+  bool _isSendingReport = false;
+  bool _isDeletingReport = false;
+
   bool _diarySaved = false;
+  bool _reportSent = false;
+
+  String? _errorMessage;
+  String? _reportId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDiaryData();
+  }
 
   @override
   void dispose() {
@@ -58,335 +75,625 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
     super.dispose();
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-  void _saveDiary() {
-    // TODO: persist to backend
-    setState(() => _diarySaved = true);
+  String get _userId {
+    return SessionService.currentUserId ?? '';
+  }
+
+  String get _address {
+    if (widget.stop.placeAddress.trim().isEmpty) {
+      return 'Indirizzo non disponibile';
+    }
+
+    return widget.stop.placeAddress.trim();
+  }
+
+  String get _category {
+    if (widget.stop.placeCategory.trim().isEmpty) {
+      return 'Categoria non disponibile';
+    }
+
+    return widget.stop.placeCategory.trim();
+  }
+
+  bool get _canUseDb {
+    return _userId.trim().isNotEmpty && widget.stop.id.trim().isNotEmpty;
+  }
+
+  Future<void> _loadDiaryData() async {
+    if (!_canUseDb) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage =
+        'Impossibile caricare il diario: utente o tappa non disponibili.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final data = await _apiService.getTravelDiaryForStop(
+        userId: _userId,
+        stopId: widget.stop.id,
+      );
+
+      final diary = data['diary'];
+      final report = data['report'];
+
+      if (!mounted) return;
+
+      setState(() {
+        if (diary is Map<String, dynamic>) {
+          _diaryRating = _asInt(diary['rating'], fallback: 0);
+          _notesCtrl.text = _asString(diary['note']);
+          _diarySaved =
+              _diaryRating > 0 || _notesCtrl.text.trim().isNotEmpty;
+        }
+
+        if (report is Map<String, dynamic>) {
+          _reportId = _asString(report['id']);
+          _selectedCategory =
+              _normalizeCategory(_asString(report['categoria']));
+          _reportCtrl.text = _asString(report['descrizione']);
+          _reportSent = _reportId != null &&
+              _reportId!.trim().isNotEmpty &&
+              _reportCtrl.text.trim().isNotEmpty;
+        }
+
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Errore durante il caricamento del diario: $e';
+      });
+    }
+  }
+
+  Future<void> _saveDiary() async {
+    if (!_canUseDb) {
+      _showSnack(
+        message: 'Utente o tappa non disponibili.',
+        color: dangerRed,
+      );
+      return;
+    }
+
+    setState(() {
+      _isSavingDiary = true;
+    });
+
+    try {
+      await _apiService.saveTravelDiaryForStop(
+        userId: _userId,
+        stopId: widget.stop.id,
+        placeId: widget.stop.placeId,
+        placeName: widget.stop.placeName,
+        rating: _diaryRating,
+        note: _notesCtrl.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _diarySaved = true;
+        _isSavingDiary = false;
+      });
+
+      _showSnack(
+        message: 'Diario salvato correttamente.',
+        color: primaryBlue,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSavingDiary = false;
+      });
+
+      _showSnack(
+        message: 'Errore durante il salvataggio del diario: $e',
+        color: dangerRed,
+      );
+    }
+  }
+
+  Future<void> _sendReport() async {
+    if (!_canUseDb) {
+      _showSnack(
+        message: 'Utente o tappa non disponibili.',
+        color: dangerRed,
+      );
+      return;
+    }
+
+    if (_reportCtrl.text.trim().isEmpty) {
+      _showSnack(
+        message: 'Inserisci una descrizione per la segnalazione.',
+        color: dangerRed,
+      );
+      return;
+    }
+
+    setState(() {
+      _isSendingReport = true;
+    });
+
+    try {
+      final result = await _apiService.createTravelReport(
+        userId: _userId,
+        stopId: widget.stop.id,
+        placeId: widget.stop.placeId,
+        placeName: widget.stop.placeName,
+        categoria: _selectedCategory,
+        descrizione: _reportCtrl.text.trim(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _reportId = _asString(result['reportId'] ?? result['id']);
+        _reportSent = true;
+        _isSendingReport = false;
+      });
+
+      _showSnack(
+        message: 'Segnalazione inviata al Comune.',
+        color: green,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isSendingReport = false;
+      });
+
+      _showSnack(
+        message: 'Errore durante l’invio della segnalazione: $e',
+        color: dangerRed,
+      );
+    }
+  }
+
+  Future<void> _deleteReport() async {
+    final reportId = _reportId;
+
+    if (reportId == null || reportId.trim().isEmpty) {
+      _showSnack(
+        message: 'Segnalazione non trovata.',
+        color: dangerRed,
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminare la segnalazione?'),
+          content: const Text(
+            'La segnalazione verrà rimossa dal database e non sarà più visibile al Comune.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annulla'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Elimina',
+                style: TextStyle(color: dangerRed),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isDeletingReport = true;
+    });
+
+    try {
+      await _apiService.deleteTravelReport(
+        userId: _userId,
+        reportId: reportId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _reportId = null;
+        _reportSent = false;
+        _reportCtrl.clear();
+        _selectedCategory = 'Affollamento';
+        _isDeletingReport = false;
+      });
+
+      _showSnack(
+        message: 'Segnalazione eliminata.',
+        color: green,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isDeletingReport = false;
+      });
+
+      _showSnack(
+        message: 'Errore durante l’eliminazione: $e',
+        color: dangerRed,
+      );
+    }
+  }
+
+  void _showSnack({
+    required String message,
+    required Color color,
+  }) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Diario salvato'),
-        backgroundColor: Color(0xFF1A56DB),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  void _sendReport() {
-    if (_reportCtrl.text.trim().isEmpty) return;
-    // TODO: POST to backend
-    setState(() => _reportSent = true);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Segnalazione inviata al Comune'),
-        backgroundColor: Color(0xFF166534),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+  int _asInt(dynamic value, {required int fallback}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+
+    return int.tryParse(value.toString()) ?? fallback;
+  }
+
+  String _asString(dynamic value) {
+    if (value == null) return '';
+    return value.toString();
+  }
+
+  String _normalizeCategory(String value) {
+    if (_reportCategories.contains(value)) return value;
+    return 'Altro';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _background,
-      appBar: _buildAppBar(),
-      body: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
-        children: [
-          // ── itinerary header card ─────────────────────────────────────────
-          _buildItineraryHeader(),
-          const SizedBox(height: 16),
-          // ── private diary ─────────────────────────────────────────────────
-          _buildDiaryCard(),
-          const SizedBox(height: 16),
-          // ── report to municipality ────────────────────────────────────────
-          _buildReportCard(),
-          const SizedBox(height: 8),
-          // ── public disclaimer ─────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                const Icon(Icons.shield_outlined,
-                    size: 13, color: Color(0xFF9CA3AF)),
-                const SizedBox(width: 4),
-                Text(
-                  'Le segnalazioni sono pubbliche e inviate al tuo Comune.',
-                  style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF9CA3AF)),
-                ),
-              ],
+      backgroundColor: lightBackground,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const EasyTourHeader(
+              showBack: true,
+              showLogout: false,
             ),
-          ),
-        ],
+            Expanded(
+              child: RefreshIndicator(
+                color: primaryBlue,
+                onRefresh: _loadDiaryData,
+                child: _buildBody(),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ── app bar ────────────────────────────────────────────────────────────────
-  AppBar _buildAppBar() {
-    return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      centerTitle: true,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: _textPrimary),
-        onPressed: () => Navigator.of(context).pop(),
-      ),
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: _primary,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.navigation_outlined,
-                color: Colors.white, size: 16),
+  Widget _buildBody() {
+    if (_isLoading) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 90, 16, 24),
+        children: const [
+          Center(
+            child: CircularProgressIndicator(color: primaryBlue),
           ),
-          const SizedBox(width: 8),
-          const Text(
-            'TripBuddy',
-            style: TextStyle(
-              color: _primary,
-              fontSize: 18,
+        ],
+      );
+    }
+
+    if (_errorMessage != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        children: [
+          _buildIntroBox(),
+          const SizedBox(height: 16),
+          _buildErrorBox(),
+        ],
+      );
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+      children: [
+        _buildIntroBox(),
+        const SizedBox(height: 16),
+        _buildSelectedPlaceBox(),
+        const SizedBox(height: 16),
+        _buildDiaryCard(),
+        const SizedBox(height: 16),
+        _buildReportCard(),
+        const SizedBox(height: 10),
+        _buildDisclaimer(),
+      ],
+    );
+  }
+
+  Widget _buildErrorBox() {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: dangerRed,
+            size: 42,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _errorMessage!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFF4A5568),
+              fontSize: 13,
+              height: 1.35,
               fontWeight: FontWeight.w700,
             ),
           ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _loadDiaryData,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryBlue,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Riprova'),
+          ),
         ],
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.notifications_none_outlined, color: _textPrimary),
-          onPressed: () {},
-        ),
-      ],
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(1),
-        child: Container(color: _divider, height: 1),
+    );
+  }
+
+  Widget _buildIntroBox() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: softBlue,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Container(
+            height: 52,
+            width: 52,
+            decoration: BoxDecoration(
+              color: const Color(0xFFDDEBFF),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Icon(
+              Icons.book_rounded,
+              color: primaryBlue,
+              size: 29,
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Diario di viaggio',
+                  style: TextStyle(
+                    color: Color(0xFF0D1B2A),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Salva ricordi personali e, se vuoi, invia una segnalazione utile al Comune.',
+                  style: TextStyle(
+                    color: Color(0xFF4A5568),
+                    fontSize: 13,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ── itinerary header ───────────────────────────────────────────────────────
-  Widget _buildItineraryHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // title section
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Diario di viaggio',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: _textPrimary,
-                ),
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'Salva i tuoi ricordi e aiuta la tua città',
-                style: TextStyle(fontSize: 13, color: _textSecondary),
-              ),
-            ],
+  Widget _buildSelectedPlaceBox() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A000000),
+            blurRadius: 10,
+            offset: Offset(0, 5),
           ),
-        ),
-        const SizedBox(height: 12),
-        // itinerary saved chip
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _divider),
-            ),
-            child: Row(
+        ],
+      ),
+      child: Row(
+        children: [
+          _buildPlaceImage(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: _primary,
-                    borderRadius: BorderRadius.circular(10),
+                Text(
+                  widget.stop.placeName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 15,
+                    height: 1.12,
+                    fontWeight: FontWeight.w900,
                   ),
-                  child: const Icon(Icons.luggage_outlined,
-                      color: Colors.white, size: 20),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Itinerario salvato',
-                        style: TextStyle(
+                const SizedBox(height: 4),
+                Text(
+                  _category,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF6B7280),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_rounded,
+                      color: primaryBlue,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 3),
+                    Expanded(
+                      child: Text(
+                        _address,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF6B7280),
                           fontSize: 11,
-                          color: _textSecondary,
-                        ),
-                      ),
-                      const Text(
-                        'Weekend a Roma',
-                        style: TextStyle(
-                          fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: _textPrimary,
                         ),
                       ),
-                      const Text(
-                        '3 giorni  •  8 luoghi',
-                        style: TextStyle(fontSize: 12, color: _textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right, color: _textSecondary, size: 18),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        // selected place chip
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFC7D7F8)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: _primary,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: const Icon(Icons.place_outlined,
-                      color: Colors.white, size: 18),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFDCFCE7),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          'Luogo selezionato',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Color(0xFF166534),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.stop.placeName,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: _textPrimary,
-                        ),
-                      ),
-                      Text(
-                        widget.stop.placeAddress,
-                        style: const TextStyle(
-                            fontSize: 11, color: _textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                // thumbnail
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    width: 56,
-                    height: 46,
-                    color: const Color(0xFFD1E0FB),
-                    child: const Icon(Icons.photo_outlined,
-                        color: _primary, size: 20),
-                  ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  // ── private diary card ─────────────────────────────────────────────────────
+  Widget _buildPlaceImage() {
+    if (widget.stop.imageUrl.trim().isEmpty) {
+      return _placeholderImage();
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(13),
+      child: Image.network(
+        widget.stop.imageUrl,
+        width: 76,
+        height: 76,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholderImage(),
+      ),
+    );
+  }
+
+  Widget _placeholderImage() {
+    return Container(
+      width: 76,
+      height: 76,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [orange, primaryBlue],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: const Center(
+        child: Icon(
+          Icons.location_on_rounded,
+          color: Colors.white,
+          size: 28,
+        ),
+      ),
+    );
+  }
+
   Widget _buildDiaryCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _divider),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0C000000),
+            blurRadius: 14,
+            offset: Offset(0, 7),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // header row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Il tuo diario (privato)',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: _textPrimary,
-                ),
-              ),
-              Row(
-                children: [
-                  const Icon(Icons.lock_outline,
-                      size: 13, color: _textSecondary),
-                  const SizedBox(width: 3),
-                  const Text(
-                    'Visibile solo a te',
-                    style: TextStyle(fontSize: 11, color: _textSecondary),
-                  ),
-                ],
-              ),
-            ],
+          _sectionHeader(
+            icon: Icons.lock_outline_rounded,
+            title: 'Il tuo diario privato',
+            subtitle: 'Visibile solo a te',
+            color: primaryBlue,
           ),
-          const SizedBox(height: 14),
-          // rating
+          const SizedBox(height: 16),
           const Text(
             'Valuta la tua esperienza',
-            style: TextStyle(fontSize: 13, color: _textSecondary),
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
-            children: List.generate(5, (i) {
+            children: List.generate(5, (index) {
+              final selected = index < _diaryRating;
+
               return GestureDetector(
-                onTap: () => setState(() => _diaryRating = i + 1),
+                onTap: () {
+                  setState(() {
+                    _diaryRating = index + 1;
+                    _diarySaved = false;
+                  });
+                },
                 child: Padding(
-                  padding: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.only(right: 5),
                   child: Icon(
-                    i < _diaryRating
+                    selected
                         ? Icons.star_rounded
                         : Icons.star_outline_rounded,
-                    color: _gold,
+                    color: gold,
                     size: 32,
                   ),
                 ),
@@ -394,35 +701,39 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
             }),
           ),
           const SizedBox(height: 16),
-          // notes
           const Text(
             'Note personali',
-            style: TextStyle(fontSize: 13, color: _textSecondary),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: _divider),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: TextField(
-              controller: _notesCtrl,
-              maxLength: 500,
-              maxLines: 4,
-              style: const TextStyle(fontSize: 14, color: _textPrimary),
-              decoration: const InputDecoration(
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: InputBorder.none,
-                counterStyle: TextStyle(fontSize: 11, color: _textSecondary),
-              ),
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 16),
-          // photos
+          const SizedBox(height: 7),
+          TextField(
+            controller: _notesCtrl,
+            maxLength: 500,
+            maxLines: 4,
+            onChanged: (_) {
+              if (_diarySaved) {
+                setState(() {
+                  _diarySaved = false;
+                });
+              }
+            },
+            decoration: _inputDecoration(
+              hint:
+              'Scrivi un ricordo, una sensazione o qualcosa che vuoi ricordare...',
+            ),
+          ),
+          const SizedBox(height: 12),
           const Text(
-            'Foto ricordo (facoltativo)',
-            style: TextStyle(fontSize: 13, color: _textSecondary),
+            'Foto ricordo',
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 8),
           SizedBox(
@@ -430,36 +741,67 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               children: [
-                // existing photos
-                ..._photos.map((p) => _PhotoThumbnail(
-                      hasImage: true,
-                      onRemove: () => setState(() => _photos.remove(p)),
-                    )),
-                // add photo button
+                ..._photos.map(
+                      (photo) => _PhotoThumbnail(
+                    onRemove: () {
+                      setState(() {
+                        _photos.remove(photo);
+                      });
+                    },
+                  ),
+                ),
                 _PhotoAddButton(
-                    onTap: () => setState(() => _photos.add('new'))),
+                  onTap: () {
+                    setState(() {
+                      _photos.add(
+                        'photo_${DateTime.now().millisecondsSinceEpoch}',
+                      );
+                    });
+                  },
+                ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          // save button
           SizedBox(
+            height: 52,
             width: double.infinity,
-            height: 46,
-            child: ElevatedButton(
-              onPressed: _saveDiary,
+            child: ElevatedButton.icon(
+              onPressed: _isSavingDiary ? null : _saveDiary,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                backgroundColor: primaryBlue,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: primaryBlue.withOpacity(0.55),
+                disabledForegroundColor: Colors.white,
                 elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
               ),
-              child: Text(
-                _diarySaved ? 'Salvato ✓' : 'Salva diario',
+              icon: _isSavingDiary
+                  ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+                  : Icon(
+                _diarySaved
+                    ? Icons.check_circle_outline_rounded
+                    : Icons.save_outlined,
+              ),
+              label: Text(
+                _isSavingDiary
+                    ? 'Salvataggio...'
+                    : _diarySaved
+                    ? 'Diario salvato'
+                    : 'Salva diario',
                 style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
@@ -468,134 +810,296 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
     );
   }
 
-  // ── report card ────────────────────────────────────────────────────────────
   Widget _buildReportCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _divider),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0C000000),
+            blurRadius: 14,
+            offset: Offset(0, 7),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // header
-          Row(
-            children: [
-              const Text(
-                'Segnalazione al Comune',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: _primary,
+          _sectionHeader(
+            icon: Icons.campaign_outlined,
+            title: 'Segnalazione al Comune',
+            subtitle: _reportSent
+                ? 'Segnalazione già inviata'
+                : 'Aiuta a migliorare il territorio',
+            color: green,
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Categoria',
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 7),
+          DropdownButtonFormField<String>(
+            value: _selectedCategory,
+            decoration: _inputDecoration(),
+            items: _reportCategories.map((category) {
+              return DropdownMenuItem<String>(
+                value: category,
+                child: Text(category),
+              );
+            }).toList(),
+            onChanged: _reportSent
+                ? null
+                : (value) {
+              if (value == null) return;
+
+              setState(() {
+                _selectedCategory = value;
+              });
+            },
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'La tua segnalazione',
+            style: TextStyle(
+              color: Color(0xFF6B7280),
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 7),
+          TextField(
+            controller: _reportCtrl,
+            maxLength: 300,
+            maxLines: 3,
+            enabled: !_reportSent,
+            decoration: _inputDecoration(
+              hint: 'Descrivi il problema o il suggerimento per il Comune...',
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_reportSent)
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      onPressed: null,
+                      style: ElevatedButton.styleFrom(
+                        disabledBackgroundColor: green,
+                        disabledForegroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.check_circle_outline_rounded,
+                        color: Colors.white,
+                      ),
+                      label: const Text(
+                        'Segnalazione inviata',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  height: 52,
+                  width: 56,
+                  child: ElevatedButton(
+                    onPressed: _isDeletingReport ? null : _deleteReport,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: dangerRed,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: dangerRed.withOpacity(0.55),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                    ),
+                    child: _isDeletingReport
+                        ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                        : const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.white,
+                      size: 25,
+                    ),
+                  ),
+                ),
+              ],
+            )
+          else
+            SizedBox(
+              height: 52,
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isSendingReport ? null : _sendReport,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryBlue,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: primaryBlue.withOpacity(0.55),
+                  disabledForegroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                icon: _isSendingReport
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+                    : const Icon(Icons.send_outlined),
+                label: Text(
+                  _isSendingReport
+                      ? 'Invio in corso...'
+                      : 'Invia segnalazione',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-              const SizedBox(width: 6),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _primaryLight,
-                  borderRadius: BorderRadius.circular(8),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+  }) {
+    return Row(
+      children: [
+        Container(
+          height: 42,
+          width: 42,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(
+            icon,
+            color: color,
+            size: 24,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: darkBlue,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
                 ),
-                child: const Text(
-                  'facoltativa',
-                  style: TextStyle(
-                      fontSize: 10, color: _primary, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  color: Color(0xFF6B7280),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 2),
-          const Text(
-            'Aiutaci a migliorare la città per tutti',
-            style: TextStyle(fontSize: 12, color: _textSecondary),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration({String? hint}) {
+    return InputDecoration(
+      hintText: hint,
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      counterStyle: const TextStyle(
+        color: Color(0xFF8A94A6),
+        fontSize: 11,
+      ),
+      hintStyle: const TextStyle(
+        color: Color(0xFF9CA3AF),
+        fontSize: 13,
+      ),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 13,
+        vertical: 12,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(
+          color: primaryBlue,
+          width: 1.4,
+        ),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+    );
+  }
+
+  Widget _buildDisclaimer() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.verified_user_outlined,
+            size: 17,
+            color: Color(0xFF8A94A6),
           ),
-          const SizedBox(height: 14),
-          // category dropdown
-          const Text(
-            'Categoria',
-            style: TextStyle(fontSize: 13, color: _textSecondary),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: _divider),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: DropdownButtonFormField<String>(
-              value: _selectedCategory,
-              onChanged: _reportSent
-                  ? null
-                  : (v) => setState(() => _selectedCategory = v!),
-              decoration: const InputDecoration(
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: InputBorder.none,
-                prefixIcon: Icon(Icons.people_outline,
-                    color: Color(0xFF6B7280), size: 20),
-              ),
-              items: _reportCategories
-                  .map((c) => DropdownMenuItem(
-                        value: c,
-                        child: Text(c,
-                            style: const TextStyle(
-                                fontSize: 14, color: _textPrimary)),
-                      ))
-                  .toList(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // description
-          const Text(
-            'La tua segnalazione',
-            style: TextStyle(fontSize: 13, color: _textSecondary),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: _divider),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: TextField(
-              controller: _reportCtrl,
-              maxLength: 300,
-              maxLines: 3,
-              enabled: !_reportSent,
-              style: const TextStyle(fontSize: 14, color: _textPrimary),
-              decoration: const InputDecoration(
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                border: InputBorder.none,
-                counterStyle: TextStyle(fontSize: 11, color: _textSecondary),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // send button
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: ElevatedButton.icon(
-              onPressed: _reportSent ? null : _sendReport,
-              icon: const Icon(Icons.send_outlined,
-                  color: Colors.white, size: 18),
-              label: Text(
-                _reportSent ? 'Segnalazione inviata ✓' : 'Invia segnalazione',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _reportSent
-                    ? const Color(0xFF166534)
-                    : _primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                elevation: 0,
+          SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              'Il diario resta personale. Le segnalazioni, invece, possono essere inviate al Comune per migliorare la gestione del luogo.',
+              style: TextStyle(
+                color: Color(0xFF8A94A6),
+                fontSize: 12,
+                height: 1.3,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -610,43 +1114,55 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PhotoThumbnail extends StatelessWidget {
-  final bool hasImage;
   final VoidCallback onRemove;
 
-  const _PhotoThumbnail({required this.hasImage, required this.onRemove});
+  const _PhotoThumbnail({
+    required this.onRemove,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Container(
-          width: 76,
-          height: 76,
-          margin: const EdgeInsets.only(right: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFFD1E0FB),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: const Icon(Icons.photo_outlined,
-              color: Color(0xFF1A56DB), size: 28),
-        ),
-        Positioned(
-          top: 2,
-          right: 10,
-          child: GestureDetector(
-            onTap: onRemove,
-            child: Container(
-              width: 20,
-              height: 20,
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.close, size: 13, color: Colors.red),
+    return Container(
+      width: 76,
+      height: 76,
+      margin: const EdgeInsets.only(right: 8),
+      child: Stack(
+        children: [
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              color: const Color(0xFFDDEBFF),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: const Icon(
+              Icons.photo_outlined,
+              color: Color(0xFF005A8D),
+              size: 28,
             ),
           ),
-        ),
-      ],
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                height: 20,
+                width: 20,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.close_rounded,
+                  color: Colors.red,
+                  size: 14,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -654,7 +1170,9 @@ class _PhotoThumbnail extends StatelessWidget {
 class _PhotoAddButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _PhotoAddButton({required this.onTap});
+  const _PhotoAddButton({
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -664,18 +1182,29 @@ class _PhotoAddButton extends StatelessWidget {
         width: 76,
         height: 76,
         decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
           border: Border.all(
-              color: const Color(0xFFD1D5DB), style: BorderStyle.solid),
-          borderRadius: BorderRadius.circular(10),
+            color: const Color(0xFFD1D5DB),
+          ),
+          borderRadius: BorderRadius.circular(13),
         ),
-        child: Column(
+        child: const Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.camera_alt_outlined,
-                color: Color(0xFF6B7280), size: 22),
-            SizedBox(height: 2),
-            Text('Aggiungi foto',
-                style: TextStyle(fontSize: 9, color: Color(0xFF6B7280))),
+          children: [
+            Icon(
+              Icons.camera_alt_outlined,
+              color: Color(0xFF6B7280),
+              size: 22,
+            ),
+            SizedBox(height: 3),
+            Text(
+              'Aggiungi',
+              style: TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),

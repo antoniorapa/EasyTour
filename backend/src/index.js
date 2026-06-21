@@ -9,7 +9,7 @@ const googlePlacesRoutes = require("./routes/googlePlaces");
 const wikiRoutes = require("./routes/wiki");
 const authRoutes = require("./routes/auth");
 const dashboardRoutes = require("./routes/dashboard_comune");
-
+const travelDiaryRoutes = require("./routes/travelDiary");
 const { verifyConnection } = require("./db");
 
 const app = express();
@@ -47,6 +47,7 @@ app.use("/itineraries", itinerariesRoutes);
 app.use("/google/places", googlePlacesRoutes);
 app.use("/wiki", wikiRoutes);
 app.use("/dashboard", dashboardRoutes);
+app.use("/travel-diary", travelDiaryRoutes);
 
 // ─────────────────────────────────────────────────────────────
 // Debug endpoint rotte

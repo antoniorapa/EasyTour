@@ -18,8 +18,8 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-    static const String baseUrl = 'http://192.168.1.13:3000';
-  //static const String baseUrl = 'http://localhost:3000';
+    //static const String baseUrl = 'http://192.168.1.13:3000';
+  static const String baseUrl = 'http://localhost:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
 
@@ -97,6 +97,105 @@ class ApiService {
     throw Exception(
       'Errore server: ${response.statusCode} - ${response.body}',
     );
+  }
+  Future<Map<String, dynamic>> getTravelDiaryForStop({
+    required String userId,
+    required String stopId,
+  }) async {
+    final url = Uri.parse(
+      '$baseUrl/travel-diary/stop/${Uri.encodeComponent(stopId)}/user/${Uri.encodeComponent(userId)}',
+    );
+
+    final response = await http.get(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+
+    throw Exception('Errore caricamento diario: ${response.statusCode} - ${response.body}');
+  }
+
+  Future<Map<String, dynamic>> saveTravelDiaryForStop({
+    required String userId,
+    required String stopId,
+    required String placeId,
+    required String placeName,
+    required int rating,
+    required String note,
+  }) async {
+    final url = Uri.parse('$baseUrl/travel-diary/save');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'stopId': stopId,
+        'placeId': placeId,
+        'placeName': placeName,
+        'rating': rating,
+        'note': note,
+      }),
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+
+    throw Exception('Errore salvataggio diario: ${response.statusCode} - ${response.body}');
+  }
+
+  Future<Map<String, dynamic>> createTravelReport({
+    required String userId,
+    required String stopId,
+    required String placeId,
+    required String placeName,
+    required String categoria,
+    required String descrizione,
+  }) async {
+    final url = Uri.parse('$baseUrl/travel-diary/report');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'userId': userId,
+        'stopId': stopId,
+        'placeId': placeId,
+        'placeName': placeName,
+        'categoria': categoria,
+        'descrizione': descrizione,
+      }),
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+
+    throw Exception('Errore invio segnalazione: ${response.statusCode} - ${response.body}');
+  }
+
+  Future<void> deleteTravelReport({
+    required String userId,
+    required String reportId,
+  }) async {
+    final url = Uri.parse(
+      '$baseUrl/travel-diary/report/${Uri.encodeComponent(reportId)}/user/${Uri.encodeComponent(userId)}',
+    );
+
+    final response = await http.delete(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    if (response.statusCode == 200 || response.statusCode == 204) {
+      return;
+    }
+
+    throw Exception('Errore eliminazione segnalazione: ${response.statusCode} - ${response.body}');
   }
   Future<Map<String, dynamic>> checkMunicipalityStatus(
       String municipalityId,

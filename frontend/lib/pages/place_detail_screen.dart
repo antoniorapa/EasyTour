@@ -1,397 +1,930 @@
 import 'package:flutter/material.dart';
-import 'itinerary_detail_screen.dart' show ItineraryStop;
+import 'package:url_launcher/url_launcher.dart';
 import 'travel_diary_screen.dart';
+import '../services/api_service.dart';
 import '../widgets/easytour_header.dart';
+import 'saved_itinerary_screen.dart' show SavedItineraryStop;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  PLACE DETAIL SCREEN  (versione aggiornata con bottone "Diario di viaggio")
-// ─────────────────────────────────────────────────────────────────────────────
+class PlaceDetailScreen extends StatefulWidget {
+  final SavedItineraryStop stop;
 
-class PlaceDetailScreen extends StatelessWidget {
-  final ItineraryStop stop;
+  const PlaceDetailScreen({
+    super.key,
+    required this.stop,
+  });
 
-  static const Color _primary = Color(0xFF1A56DB);
-  static const Color _textPrimary = Color(0xFF111827);
-  static const Color _textSecondary = Color(0xFF6B7280);
-  static const Color _divider = Color(0xFFE5E7EB);
-  static const Color _gold = Color(0xFFF59E0B);
-  static const Color _background = Color(0xFFF9FAFB);
+  @override
+  State<PlaceDetailScreen> createState() => _PlaceDetailScreenState();
+}
 
-  const PlaceDetailScreen({super.key, required this.stop});
+class _PlaceDetailScreenState extends State<PlaceDetailScreen> {
+  final ApiService apiService = ApiService();
+
+  static const Color primaryBlue = Color(0xFF005A8D);
+  static const Color darkBlue = Color(0xFF003F63);
+  static const Color orange = Color(0xFFF58A00);
+  static const Color lightBackground = Color(0xFFF7FAFC);
+  static const Color softBlue = Color(0xFFEAF4FA);
+  static const Color softOrange = Color(0xFFFFF2DF);
+
+  bool isLoading = true;
+  String? errorMessage;
+
+  String nome = '';
+  String categoria = '';
+  String indirizzo = '';
+  String descrizione = '';
+  String? wikipediaDescription;
+  String? wikipediaUrl;
+
+  double latitudine = 0;
+  double longitudine = 0;
+  double rating = 0;
+  int numeroRecensioni = 0;
+
+  List<String> imageUrls = [];
+  List<Map<String, dynamic>> recensioniGoogle = [];
+
+  int currentImageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    loadPlaceDetail();
+  }
+
+  Future<void> loadPlaceDetail() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    nome = widget.stop.placeName;
+    categoria = widget.stop.placeCategory;
+    indirizzo = widget.stop.placeAddress;
+    descrizione = widget.stop.description;
+    latitudine = widget.stop.latitude;
+    longitudine = widget.stop.longitude;
+    rating = widget.stop.rating;
+    numeroRecensioni = widget.stop.reviewsCount;
+
+    final List<String> loadedImages = [];
+    final List<Map<String, dynamic>> loadedReviews = [];
+
+    if (widget.stop.imageUrl.trim().isNotEmpty) {
+      loadedImages.add(widget.stop.imageUrl.trim());
+    }
+
+    try {
+      if (widget.stop.placeId.trim().isNotEmpty) {
+        final detailData = await apiService.getGooglePlaceDetailRaw(
+          widget.stop.placeId,
+        );
+
+        nome = _asString(
+          detailData['nome'] ??
+              detailData['name'] ??
+              detailData['displayName']?['text'],
+          fallback: nome,
+        );
+
+        categoria = _asString(
+          detailData['categoria'] ??
+              detailData['category'] ??
+              detailData['primaryTypeDisplayName']?['text'],
+          fallback: categoria,
+        );
+
+        indirizzo = _asString(
+          detailData['indirizzo'] ??
+              detailData['formattedAddress'] ??
+              detailData['address'],
+          fallback: indirizzo,
+        );
+
+        descrizione = _asString(
+          detailData['descrizione'] ?? detailData['description'],
+          fallback: descrizione,
+        );
+
+        latitudine = _asDouble(
+          detailData['latitudine'] ??
+              detailData['latitude'] ??
+              detailData['lat'] ??
+              detailData['location']?['latitude'] ??
+              detailData['geometry']?['location']?['lat'],
+          fallback: latitudine,
+        );
+
+        longitudine = _asDouble(
+          detailData['longitudine'] ??
+              detailData['longitude'] ??
+              detailData['lng'] ??
+              detailData['location']?['longitude'] ??
+              detailData['geometry']?['location']?['lng'],
+          fallback: longitudine,
+        );
+
+        rating = _asDouble(
+          detailData['rating'] ?? detailData['valutazione'],
+          fallback: rating,
+        );
+
+        numeroRecensioni = _asInt(
+          detailData['numeroRecensioni'] ??
+              detailData['userRatingCount'] ??
+              detailData['reviewsCount'],
+          fallback: numeroRecensioni,
+        );
+
+        final reviews = detailData['recensioniGoogle'] ?? detailData['reviews'];
+
+        if (reviews is List) {
+          for (final review in reviews) {
+            if (review is Map<String, dynamic>) {
+              loadedReviews.add(review);
+            }
+          }
+        }
+
+        final photoToken = _asString(
+          detailData['photoReference'] ??
+              detailData['photoName'] ??
+              detailData['photo_reference'] ??
+              detailData['photos']?[0]?['name'] ??
+              detailData['photos']?[0]?['photo_reference'],
+          fallback: '',
+        );
+
+        if (photoToken.isNotEmpty) {
+          try {
+            final googlePhotoUrl = await apiService.getGooglePlacePhotoUrl(
+              photoToken,
+            );
+
+            if (googlePhotoUrl != null && googlePhotoUrl.isNotEmpty) {
+              loadedImages.add(googlePhotoUrl);
+            }
+          } catch (_) {}
+        }
+      }
+
+      try {
+        final wikiSummary = await apiService.getWikipediaSummary(nome);
+
+        wikipediaDescription =
+            wikiSummary['descrizione']?.toString() ??
+                wikiSummary['description']?.toString() ??
+                wikiSummary['extract']?.toString() ??
+                descrizione;
+
+        wikipediaUrl =
+            wikiSummary['wikipediaUrl']?.toString() ??
+                wikiSummary['content_urls']?['desktop']?['page']?.toString();
+
+        final wikiImageUrl =
+            wikiSummary['immagineUrl']?.toString() ??
+                wikiSummary['imageUrl']?.toString() ??
+                wikiSummary['thumbnail']?['source']?.toString() ??
+                wikiSummary['originalimage']?['source']?.toString();
+
+        if (wikiImageUrl != null && wikiImageUrl.isNotEmpty) {
+          loadedImages.add(wikiImageUrl);
+        }
+      } catch (_) {
+        wikipediaDescription = descrizione;
+      }
+
+      try {
+        final wikiImages = await apiService.getWikipediaImages(nome);
+
+        for (final imageUrl in wikiImages) {
+          if (imageUrl.isNotEmpty) {
+            loadedImages.add(imageUrl);
+          }
+        }
+      } catch (_) {}
+
+      final uniqueImages = loadedImages.toSet().toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        recensioniGoogle = loadedReviews;
+        imageUrls = uniqueImages;
+        isLoading = false;
+      });
+    } catch (e) {
+      try {
+        final wikiSummary = await apiService.getWikipediaSummary(nome);
+
+        wikipediaDescription =
+            wikiSummary['descrizione']?.toString() ??
+                wikiSummary['description']?.toString() ??
+                wikiSummary['extract']?.toString() ??
+                descrizione;
+
+        wikipediaUrl =
+            wikiSummary['wikipediaUrl']?.toString() ??
+                wikiSummary['content_urls']?['desktop']?['page']?.toString();
+
+        final wikiImageUrl =
+            wikiSummary['immagineUrl']?.toString() ??
+                wikiSummary['imageUrl']?.toString() ??
+                wikiSummary['thumbnail']?['source']?.toString();
+
+        if (wikiImageUrl != null && wikiImageUrl.isNotEmpty) {
+          loadedImages.add(wikiImageUrl);
+        }
+
+        final wikiImages = await apiService.getWikipediaImages(nome);
+
+        for (final imageUrl in wikiImages) {
+          if (imageUrl.isNotEmpty) {
+            loadedImages.add(imageUrl);
+          }
+        }
+
+        if (!mounted) return;
+
+        setState(() {
+          imageUrls = loadedImages.toSet().toList();
+          isLoading = false;
+        });
+      } catch (_) {
+        if (!mounted) return;
+
+        setState(() {
+          imageUrls = loadedImages.toSet().toList();
+          wikipediaDescription = descrizione;
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  String _asString(dynamic value, {required String fallback}) {
+    if (value == null) return fallback;
+
+    final text = value.toString().trim();
+
+    if (text.isEmpty) return fallback;
+
+    return text;
+  }
+
+  int _asInt(dynamic value, {required int fallback}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+
+    return int.tryParse(value.toString()) ?? fallback;
+  }
+
+  double _asDouble(dynamic value, {required double fallback}) {
+    if (value == null) return fallback;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+
+    return double.tryParse(value.toString()) ?? fallback;
+  }
+
+  Future<void> openGoogleMaps() async {
+    Uri url;
+
+    if (latitudine != 0 && longitudine != 0) {
+      url = Uri.parse(
+        'https://www.google.com/maps/dir/?api=1&destination=$latitudine,$longitudine&travelmode=walking',
+      );
+    } else {
+      final query = Uri.encodeComponent('$nome $indirizzo');
+
+      url = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$query',
+      );
+    }
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossibile aprire Google Maps.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> openGoogleReviews() async {
+    Uri url;
+
+    if (widget.stop.placeId.trim().isNotEmpty &&
+        latitudine != 0 &&
+        longitudine != 0) {
+      url = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$latitudine,$longitudine&query_place_id=${widget.stop.placeId}',
+      );
+    } else if (latitudine != 0 && longitudine != 0) {
+      url = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$latitudine,$longitudine',
+      );
+    } else {
+      final query = Uri.encodeComponent('$nome $indirizzo');
+
+      url = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$query',
+      );
+    }
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossibile aprire le recensioni Google.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> openWikipedia() async {
+    final url = wikipediaUrl;
+
+    if (url == null || url.isEmpty) return;
+
+    final uri = Uri.parse(url);
+
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Impossibile aprire Wikipedia.'),
+        ),
+      );
+    }
+  }
+
+  String _ratingText() {
+    if (rating <= 0) {
+      return '-';
+    }
+
+    return rating.toStringAsFixed(1);
+  }
+
+  String _reviewsText() {
+    if (numeroRecensioni <= 0) {
+      return 'Recensioni non disponibili';
+    }
+
+    return '$numeroRecensioni recensioni';
+  }
+
+  String _addressText() {
+    if (indirizzo.trim().isNotEmpty) {
+      return indirizzo;
+    }
+
+    return 'Indirizzo non disponibile';
+  }
+
+  String _categoryText() {
+    if (categoria.trim().isNotEmpty) {
+      return categoria;
+    }
+
+    return 'Categoria non disponibile';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: CustomScrollView(
-        slivers: [
-          // ── hero image + back button ──────────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 240,
-            pinned: true,
-            backgroundColor: Colors.white,
-            leading: Padding(
-              padding: const EdgeInsets.all(8),
-              child: CircleAvatar(
-                backgroundColor: Colors.white,
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: _textPrimary),
-                  onPressed: () => Navigator.of(context).pop(),
+      backgroundColor: lightBackground,
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              EasyTourHeader(
+                rightIcon: Icons.arrow_back_rounded,
+                onRightIconTap: () => Navigator.pop(context),
+              ),
+              Expanded(
+                child: isLoading
+                    ? const Center(
+                  child: CircularProgressIndicator(color: primaryBlue),
+                )
+                    : errorMessage != null
+                    ? _buildErrorState()
+                    : _buildContent(),
+              ),
+            ],
+          ),
+          if (!isLoading && errorMessage == null)
+            _buildBottomStartButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x10000000),
+                blurRadius: 14,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: orange,
+                size: 48,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-            ),
-            centerTitle: true,
-            title: const Text(
-              'Dettaglio luogo',
-              style: TextStyle(
-                color: _textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: loadPlaceDetail,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryBlue,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Riprova'),
               ),
-            ),
-            flexibleSpace: FlexibleSpaceBar(
-              background: _HeroImage(imageUrl: stop.imageUrl),
-            ),
+            ],
           ),
-          // ── content ───────────────────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // name
-                  Text(
-                    stop.placeName,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: _textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // rating row
-                  Row(
-                    children: [
-                      ...List.generate(5, (i) {
-                        if (i < stop.rating.floor()) {
-                          return const Icon(Icons.star_rounded,
-                              color: _gold, size: 18);
-                        } else if (i < stop.rating && stop.rating % 1 >= 0.5) {
-                          return const Icon(Icons.star_half_rounded,
-                              color: _gold, size: 18);
-                        }
-                        return const Icon(Icons.star_outline_rounded,
-                            color: _gold, size: 18);
-                      }),
-                      const SizedBox(width: 6),
-                      Text(
-                        '${stop.rating} (${_formatCount(stop.reviewsCount)} recensioni)',
-                        style: const TextStyle(
-                            fontSize: 13, color: _textSecondary),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // chips row
-                  Row(
-                    children: [
-                      _InfoChip(
-                          icon: Icons.location_on_outlined,
-                          label: stop.placeAddress.split(',').last.trim()),
-                      const SizedBox(width: 8),
-                      _InfoChip(
-                          icon: Icons.domain_outlined,
-                          label: stop.placeAddress.split(',').first.trim(),
-                          maxWidth: 120),
-                      const SizedBox(width: 8),
-                      _InfoChip(
-                          icon: Icons.account_balance_outlined,
-                          label: stop.placeCategory),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  // description header
-                  Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: const BoxDecoration(
-                          color: _primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.info_outline,
-                            color: Colors.white, size: 16),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Descrizione',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: _textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    stop.description,
-                    style: const TextStyle(
-                        fontSize: 14,
-                        color: _textPrimary,
-                        height: 1.55),
-                  ),
-                  const SizedBox(height: 20),
-                  // map tile
-                  _MapTile(stop: stop),
-                ],
-              ),
-            ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _buildImageHeader(),
+        _buildMainInfo(),
+        _buildDescriptionSection(),
+        _buildLocationSection(),
+        const SizedBox(height: 105),
+      ],
+    );
+  }
+
+  Widget _buildImageHeader() {
+    return Container(
+      height: 280,
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      decoration: BoxDecoration(
+        color: softBlue,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x16000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
-      // ── bottom buttons ────────────────────────────────────────────────────
-      bottomNavigationBar: _BottomBar(stop: stop),
-    );
-  }
-
-  String _formatCount(int n) {
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}.${((n % 1000) ~/ 100)}k';
-    return n.toString();
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  SUB-WIDGETS
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _HeroImage extends StatelessWidget {
-  final String imageUrl;
-
-  const _HeroImage({required this.imageUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFFE8EFFD),
-      child: imageUrl.isNotEmpty
-          ? Image.network(imageUrl, fit: BoxFit.cover, width: double.infinity)
-          : const Center(
-              child: Icon(Icons.photo_outlined,
-                  color: Color(0xFF1A56DB), size: 48)),
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final double? maxWidth;
-
-  const _InfoChip({required this.icon, required this.label, this.maxWidth});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: maxWidth != null ? BoxConstraints(maxWidth: maxWidth!) : null,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
         children: [
-          Icon(icon, size: 13, color: const Color(0xFF6B7280)),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MapTile extends StatelessWidget {
-  final ItineraryStop stop;
-
-  static const Color _primary = Color(0xFF1A56DB);
-  static const Color _textPrimary = Color(0xFF111827);
-  static const Color _textSecondary = Color(0xFF6B7280);
-
-  const _MapTile({required this.stop});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          // mini-map placeholder
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(13),
-              bottomLeft: Radius.circular(13),
-            ),
-            child: Container(
-              width: 90,
-              height: 70,
-              color: const Color(0xFFDCFCE7),
+          if (imageUrls.isEmpty)
+            Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [orange, primaryBlue],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
               child: const Center(
-                child: Icon(Icons.map_outlined,
-                    color: Color(0xFF166534), size: 30),
+                child: Icon(
+                  Icons.photo_camera_back_rounded,
+                  color: Colors.white,
+                  size: 70,
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    stop.placeAddress,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Nel centro di ${stop.placeAddress.split(',').last.trim()}',
-                    style: const TextStyle(
-                        fontSize: 11, color: _textSecondary),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(Icons.refresh_outlined, size: 13, color: _primary),
-                      const SizedBox(width: 3),
-                      Text(
-                        'Apri in app Mappe',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _primary,
-                          fontWeight: FontWeight.w500,
+            )
+          else
+            PageView.builder(
+              itemCount: imageUrls.length,
+              onPageChanged: (index) {
+                setState(() {
+                  currentImageIndex = index;
+                });
+              },
+              itemBuilder: (context, index) {
+                return Image.network(
+                  imageUrls[index],
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [orange, primaryBlue],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
                       ),
-                    ],
-                  ),
-                ],
-              ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.broken_image_rounded,
+                          color: Colors.white,
+                          size: 58,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          Positioned(
+            left: 14,
+            top: 14,
+            child: _glassBadge(
+              icon: Icons.image_rounded,
+              text: imageUrls.isEmpty
+                  ? 'Immagine non disponibile'
+                  : '${currentImageIndex + 1}/${imageUrls.length}',
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.only(right: 12),
-            child: Icon(Icons.chevron_right,
-                color: Color(0xFF6B7280), size: 18),
+          if (imageUrls.length > 1)
+            Positioned(
+              right: 14,
+              bottom: 14,
+              child: _glassBadge(
+                icon: Icons.swipe_rounded,
+                text: 'Scorri',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _glassBadge({
+    required IconData icon,
+    required String text,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white, size: 17),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
           ),
         ],
       ),
     );
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  BOTTOM BAR  — "Parti" + "Diario di viaggio"  (NUOVA AGGIUNTA)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _BottomBar extends StatelessWidget {
-  final ItineraryStop stop;
-
-  static const Color _primary = Color(0xFF1A56DB);
-
-  const _BottomBar({required this.stop});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildMainInfo() {
     return Container(
-      color: Colors.white,
-      padding: EdgeInsets.fromLTRB(
-          16, 12, 16, MediaQuery.of(context).padding.bottom + 12),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x10000000),
+            blurRadius: 14,
+            offset: Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Parti ─────────────────────────────────────────────────────────
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                // TODO: openMapsNavigation(stop.latitude, stop.longitude)
-              },
-              icon: const Icon(Icons.navigation_outlined,
-                  color: Colors.white, size: 20),
-              label: const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Parti',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white)),
-                  Text('Apri navigazione verso questo luogo',
-                      style: TextStyle(fontSize: 11, color: Colors.white70)),
-                ],
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _primary,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
-              ),
+          Text(
+            nome,
+            style: const TextStyle(
+              color: darkBlue,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              height: 1.1,
             ),
           ),
           const SizedBox(height: 10),
-          // ── Diario di viaggio  (NUOVO) ────────────────────────────────────
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TravelDiaryScreen(stop: stop),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.book_outlined, color: _primary, size: 20),
-              label: const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Diario di viaggio',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: _primary)),
-                  Text('Salva ricordi di questo luogo',
-                      style: TextStyle(
-                          fontSize: 11, color: Color(0xFF6B7280))),
-                ],
+          Text(
+            _categoryText(),
+            style: const TextStyle(
+              color: Colors.black54,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _ratingBadgeButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _ratingBadgeButton() {
+    return InkWell(
+      onTap: openGoogleReviews,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: orange.withOpacity(0.11),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: orange.withOpacity(0.22),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.star_rounded,
+              color: orange,
+              size: 30,
+            ),
+            const SizedBox(width: 10),
+            Text(
+              _ratingText(),
+              style: const TextStyle(
+                color: orange,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
               ),
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _primary),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _reviewsText(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.black54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.open_in_new_rounded,
+              color: orange,
+              size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDescriptionSection() {
+    final text =
+    wikipediaDescription == null || wikipediaDescription!.trim().isEmpty
+        ? 'Descrizione non disponibile per questa attrazione.'
+        : wikipediaDescription!;
+
+    return _sectionCard(
+      title: 'Descrizione',
+      icon: Icons.article_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 15,
+              height: 1.45,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (wikipediaUrl != null && wikipediaUrl!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: InkWell(
+                onTap: openWikipedia,
+                borderRadius: BorderRadius.circular(12),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                  child: Text(
+                    'Continua a leggere su Wiki',
+                    style: TextStyle(
+                      color: primaryBlue,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationSection() {
+    return _sectionCard(
+      title: 'Posizione',
+      icon: Icons.location_on_rounded,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _addressText(),
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 15,
+              height: 1.35,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: softBlue,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(
+              'Coordinate: ${latitudine.toStringAsFixed(5)}, ${longitudine.toStringAsFixed(5)}',
+              style: const TextStyle(
+                color: darkBlue,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 13,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                height: 38,
+                width: 38,
+                decoration: BoxDecoration(
+                  color: softOrange,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: orange, size: 21),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: darkBlue,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomStartButton() {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 18,
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => TravelDiaryScreen(
+                          stop: widget.stop,
+                        ),
+                      ),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: primaryBlue,
+                    side: const BorderSide(
+                      color: primaryBlue,
+                      width: 1.4,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    backgroundColor: Colors.white,
+                  ),
+                  icon: const Icon(
+                    Icons.book_outlined,
+                    color: primaryBlue,
+                  ),
+                  label: const Text(
+                    'Vai al diario',
+                    style: TextStyle(
+                      color: primaryBlue,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
+                height: 56,
+                child: ElevatedButton.icon(
+                  onPressed: openGoogleMaps,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryBlue,
+                    foregroundColor: Colors.white,
+                    elevation: 8,
+                    shadowColor: Colors.black.withOpacity(0.25),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  icon: const Icon(
+                    Icons.navigation_rounded,
+                    color: Colors.white,
+                  ),
+                  label: const Text(
+                    'Parti',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
