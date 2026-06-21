@@ -682,13 +682,43 @@ class ApiService {
   /// Segnalazioni ricevute (RF-C6). Per ora torna lista vuota.
   Future<List<Map<String, dynamic>>> getDashboardReports(String token) async {
     final url = Uri.parse('$baseUrl/dashboard/reports');
-    final response = await http.get(url, headers: _authHeaders(token));
+
+    print('GET dashboard reports: $url');
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+
+    print('Status dashboard reports: ${response.statusCode}');
+    print('Body dashboard reports: ${response.body}');
+
     if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-      return data.map((e) => e as Map<String, dynamic>).toList();
-    } else {
-      throw Exception('Errore nel caricamento delle segnalazioni');
+      final data = jsonDecode(response.body);
+
+      if (data is List) {
+        return data
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+      }
+
+      if (data is Map<String, dynamic> && data['reports'] is List) {
+        return (data['reports'] as List)
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+      }
+
+      return [];
     }
+
+    throw Exception(
+      'Errore dashboard reports: ${response.statusCode} - ${response.body}',
+    );
   }
 
 }

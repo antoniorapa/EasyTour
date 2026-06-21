@@ -180,43 +180,66 @@ router.get('/places-to-improve', async (req, res) => {
 */
 router.get('/filters', async (req, res) => {
   const session = driver.session({ database: process.env.NEO4J_DATABASE });
+
   try {
     const municipalityId = await getMunicipalityId(session, req.user.userId);
+
     if (!municipalityId) {
       return res.status(404).json({ message: 'Nessun Comune associato' });
     }
 
     const result = await session.run(
       `
-      WITH ['Tutti', 'ho_solo_2_ore', 'budget_limitato', 'posti_nascosti'] AS codici
-      UNWIND codici AS codice
-      OPTIONAL MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
-      WITH codice,
-           CASE codice WHEN 'Tutti' THEN 'none' ELSE codice END AS codiceRaw,
-           i
-      WITH codice, codiceRaw,
-           count(CASE WHEN coalesce(i.filterType, 'none') = codiceRaw THEN 1 END) AS quanti
-      RETURN codice AS filtro, quanti
-      ORDER BY quanti DESC
+      MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
+      WITH
+        CASE
+          WHEN i.filterType IS NULL OR i.filterType = '' OR i.filterType = 'none' OR i.filterType = 'Tutti' THEN 'Tutti'
+
+          WHEN toLower(i.filterType) IN ['ho_solo_2_ore', '2 ore', 'ho solo 2 ore', 'solo 2 ore'] THEN 'Ho solo 2 ore'
+
+          WHEN toLower(i.filterType) IN ['budget_limitato', 'budget limitato', 'budget'] THEN 'Budget limitato'
+
+          WHEN toLower(i.filterType) IN ['posti_nascosti', 'posti nascosti', 'nascosti', 'hidden gems'] THEN 'Posti nascosti'
+
+          ELSE i.filterType
+        END AS filtroNormalizzato,
+        count(i) AS quanti
+
+      WITH collect({
+        filtro: filtroNormalizzato,
+        quanti: quanti
+      }) AS dati
+
+      UNWIND ['Tutti', 'Ho solo 2 ore', 'Budget limitato', 'Posti nascosti'] AS filtroBase
+
+      WITH filtroBase, dati,
+           [d IN dati WHERE d.filtro = filtroBase | d.quanti] AS conteggi
+
+      RETURN
+        filtroBase AS filtro,
+        CASE
+          WHEN size(conteggi) = 0 THEN 0
+          ELSE conteggi[0]
+        END AS quanti
+
+      ORDER BY
+        CASE filtroBase
+          WHEN 'Tutti' THEN 1
+          WHEN 'Ho solo 2 ore' THEN 2
+          WHEN 'Budget limitato' THEN 3
+          WHEN 'Posti nascosti' THEN 4
+          ELSE 5
+        END
       `,
       { municipalityId }
     );
 
-    // Mappa i codici filtro alle etichette leggibili del mock-up.
-    const etichette = {
-      'Tutti': 'Tutti',
-      'ho_solo_2_ore': 'Ho solo 2 ore',
-      'budget_limitato': 'Budget limitato',
-      'posti_nascosti': 'Posti nascosti',
-    };
+    const filtri = result.records.map((r) => ({
+      filtro: r.get('filtro'),
+      quanti: toNum(r.get('quanti')),
+    }));
 
-    const filtri = result.records.map((r) => {
-      const codice = r.get('filtro');
-      return {
-        filtro: etichette[codice] || codice,
-        quanti: toNum(r.get('quanti')),
-      };
-    });
+    console.log('DASHBOARD FILTERS:', filtri);
 
     res.json(filtri);
   } catch (error) {
@@ -235,7 +258,74 @@ router.get('/filters', async (req, res) => {
   frontend mostra lo stato "nessuna segnalazione" senza errori.
 */
 router.get('/reports', async (req, res) => {
-  res.json([]);
+  const session = driver.session({ database: process.env.NEO4J_DATABASE });
+
+  try {
+    const municipalityId = await getMunicipalityId(session, req.user.userId);
+
+    console.log('DASHBOARD REPORTS - userId:', req.user.userId);
+    console.log('DASHBOARD REPORTS - municipalityId:', municipalityId);
+
+    if (!municipalityId) {
+      return res.status(404).json({ message: 'Nessun Comune associato' });
+    }
+
+    const result = await session.run(
+      `
+      MATCH (operator:User {id: $operatorId})-[:MANAGES]->(m:Municipality)
+      MATCH (r:Report)-[:FOR_MUNICIPALITY]->(m)
+      OPTIONAL MATCH (u:User)-[:CREATED_REPORT]->(r)
+      OPTIONAL MATCH (r)-[:ABOUT_PLACE]->(p:Place)
+      RETURN
+        r.id AS id,
+        r.categoria AS categoria,
+        r.descrizione AS descrizione,
+        r.stato AS stato,
+        r.fonte AS fonte,
+        r.dataCreazione AS dataCreazione,
+        u.id AS userId,
+        coalesce(u.username, u.nome, u.email) AS username,
+        u.email AS userEmail,
+        p.id AS placeId,
+        coalesce(p.nome, r.placeName) AS placeName,
+        m.id AS municipalityId,
+        m.nome AS municipalityName
+      ORDER BY r.dataCreazione DESC
+      `,
+      {
+        operatorId: req.user.userId,
+      }
+    );
+
+    const reports = result.records.map((record) => ({
+      id: record.get('id'),
+      categoria: record.get('categoria') || 'Segnalazione',
+      descrizione: record.get('descrizione') || '',
+      stato: record.get('stato') || 'NUOVA',
+      fonte: record.get('fonte') || 'DIARIO_VIAGGIO',
+      dataCreazione: record.get('dataCreazione')?.toString() || '',
+      userId: record.get('userId') || '',
+      username: record.get('username') || 'Utente',
+      userEmail: record.get('userEmail') || '',
+      placeId: record.get('placeId') || '',
+      placeName: record.get('placeName') || 'Luogo non specificato',
+      municipalityId: record.get('municipalityId') || '',
+      municipalityName: record.get('municipalityName') || '',
+    }));
+
+    console.log('DASHBOARD REPORTS - trovati:', reports.length);
+    console.log('DASHBOARD REPORTS - dati:', reports);
+
+    return res.json(reports);
+  } catch (error) {
+    console.error('Errore /reports:', error);
+    return res.status(500).json({
+      message: 'Errore durante il caricamento delle segnalazioni',
+      error: error.message,
+    });
+  } finally {
+    await session.close();
+  }
 });
 
 module.exports = router;

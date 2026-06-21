@@ -9,7 +9,11 @@ class DashboardPage extends StatefulWidget {
   final User user;
   final String token;
 
-  const DashboardPage({super.key, required this.user, required this.token});
+  const DashboardPage({
+    super.key,
+    required this.user,
+    required this.token,
+  });
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -22,10 +26,14 @@ class _DashboardPageState extends State<DashboardPage> {
   static const Color darkBlue = Color(0xFF003F63);
   static const Color orange = Color(0xFFF58A00);
   static const Color lightBackground = Color(0xFFF4F7FA);
+  static const Color green = Color(0xFF00A676);
+  static const Color dangerRed = Color(0xFFE53935);
 
   bool isLoading = true;
   bool _topPlacesExpanded = false;
   bool _improveExpanded = false;
+  bool _reportsExpanded = false;
+
   String? errorMessage;
 
   Map<String, dynamic> summary = {};
@@ -34,54 +42,67 @@ class _DashboardPageState extends State<DashboardPage> {
   List<Map<String, dynamic>> filters = [];
   List<Map<String, dynamic>> reports = [];
 
-  // Cache delle immagini recuperate per nome luogo (evita richieste ripetute).
   final Map<String, Future<String?>> _imageCache = {};
 
-  // Recupera l'immagine di un luogo. Se immagineUrl è valido lo usa,
-  // altrimenti (vuoto o URL finto example.com) prova Wikipedia.
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
   Future<String?> _getPlaceImage(Map<String, dynamic> place) {
-    final nome = place['nome']?.toString() ?? '';
-    final url = place['immagineUrl']?.toString() ?? '';
+    final nome = place['nome']?.toString() ??
+        place['placeName']?.toString() ??
+        place['luogo']?.toString() ??
+        '';
+
+    final url = place['immagineUrl']?.toString() ??
+        place['imageUrl']?.toString() ??
+        '';
 
     final cacheKey = nome.isNotEmpty ? nome : url;
+
     if (_imageCache.containsKey(cacheKey)) {
       return _imageCache[cacheKey]!;
     }
 
     final future = _fetchPlaceImage(nome, url);
     _imageCache[cacheKey] = future;
+
     return future;
   }
 
   Future<String?> _fetchPlaceImage(String nome, String url) async {
-    // URL valido e non finto -> usalo direttamente.
     final isFake = url.contains('example.com');
+
     if (url.isNotEmpty && !isFake) {
       return url;
     }
 
     if (nome.isEmpty) return null;
 
-    // Prova il summary di Wikipedia (di solito ha l'immagine principale).
     try {
       final summary = await apiService.getWikipediaSummary(nome);
-      final wikiUrl = summary['immagineUrl']?.toString();
-      if (wikiUrl != null && wikiUrl.isNotEmpty) return wikiUrl;
+
+      final wikiUrl = summary['immagineUrl']?.toString() ??
+          summary['imageUrl']?.toString() ??
+          summary['thumbnail']?['source']?.toString() ??
+          summary['originalimage']?['source']?.toString();
+
+      if (wikiUrl != null && wikiUrl.isNotEmpty) {
+        return wikiUrl;
+      }
     } catch (_) {}
 
-    // Fallback: prima immagine dalla lista Wikipedia.
     try {
       final images = await apiService.getWikipediaImages(nome);
-      if (images.isNotEmpty && images.first.isNotEmpty) return images.first;
+
+      if (images.isNotEmpty && images.first.isNotEmpty) {
+        return images.first;
+      }
     } catch (_) {}
 
     return null;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _loadData();
   }
 
   Future<void> _loadData() async {
@@ -100,6 +121,7 @@ class _DashboardPageState extends State<DashboardPage> {
       ]);
 
       if (!mounted) return;
+
       setState(() {
         summary = results[0] as Map<String, dynamic>;
         topPlaces = results[1] as List<Map<String, dynamic>>;
@@ -110,6 +132,7 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
         errorMessage = e.toString().replaceFirst('Exception: ', '');
         isLoading = false;
@@ -123,41 +146,204 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  String _nomeComune() {
+    final id = widget.user.municipalityId ?? '';
+
+    if (id.isEmpty) return 'Comune';
+
+    final parte = id.replaceFirst('comune_', '').replaceAll('_', ' ');
+
+    if (parte.isEmpty) return 'Comune';
+
+    return parte
+        .split(' ')
+        .map((word) {
+      if (word.isEmpty) return word;
+      return word[0].toUpperCase() + word.substring(1);
+    })
+        .join(' ');
+  }
+
+  int _asInt(dynamic value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+
+    if (value is Map) {
+      final low = value['low'];
+
+      if (low is int) return low;
+      if (low is double) return low.toInt();
+
+      return int.tryParse(low?.toString() ?? '') ?? 0;
+    }
+
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  String _asString(dynamic value, {String fallback = ''}) {
+    if (value == null) return fallback;
+
+    final text = value.toString();
+
+    if (text.trim().isEmpty) return fallback;
+
+    return text;
+  }
+
+  String _filterLabelFromRaw(dynamic value) {
+    final raw = value?.toString().trim() ?? '';
+
+    if (raw.isEmpty) return 'Tutti';
+
+    final lower = raw.toLowerCase();
+
+    if (lower == 'none' || lower == 'tutti') {
+      return 'Tutti';
+    }
+
+    if (lower == 'ho_solo_2_ore' ||
+        lower == '2 ore' ||
+        lower == 'ho solo 2 ore' ||
+        lower == 'solo 2 ore') {
+      return 'Ho solo 2 ore';
+    }
+
+    if (lower == 'budget_limitato' ||
+        lower == 'budget limitato' ||
+        lower == 'budget') {
+      return 'Budget limitato';
+    }
+
+    if (lower == 'posti_nascosti' ||
+        lower == 'posti nascosti' ||
+        lower == 'nascosti' ||
+        lower == 'hidden gems') {
+      return 'Posti nascosti';
+    }
+
+    return raw;
+  }
+
+  List<Map<String, dynamic>> _normalizedFilters() {
+    final Map<String, int> counts = {
+      'Tutti': 0,
+      'Ho solo 2 ore': 0,
+      'Budget limitato': 0,
+      'Posti nascosti': 0,
+    };
+
+    for (final filter in filters) {
+      final label = _filterLabelFromRaw(
+        filter['filtro'] ?? filter['filterType'] ?? filter['label'],
+      );
+
+      final quanti = _asInt(
+        filter['quanti'] ?? filter['count'] ?? filter['totale'],
+      );
+
+      counts[label] = (counts[label] ?? 0) + quanti;
+    }
+
+    return counts.entries
+        .map((entry) => {
+      'filtro': entry.key,
+      'quanti': entry.value,
+    })
+        .toList();
+  }
+
+  String _formatDate(dynamic value) {
+    if (value == null) return '';
+
+    final text = value.toString();
+
+    if (text.isEmpty) return '';
+
+    final parsed = DateTime.tryParse(text);
+
+    if (parsed == null) {
+      return text.length > 16 ? text.substring(0, 16) : text;
+    }
+
+    return '${parsed.day.toString().padLeft(2, '0')}/'
+        '${parsed.month.toString().padLeft(2, '0')}/'
+        '${parsed.year} '
+        '${parsed.hour.toString().padLeft(2, '0')}:'
+        '${parsed.minute.toString().padLeft(2, '0')}';
+  }
+
+  Color _statusColor(String stato) {
+    switch (stato.toUpperCase()) {
+      case 'RISOLTA':
+      case 'RISOLTO':
+      case 'CHIUSA':
+      case 'CHIUSO':
+        return green;
+      case 'IN_LAVORAZIONE':
+      case 'IN LAVORAZIONE':
+        return orange;
+      case 'NUOVA':
+      default:
+        return dangerRed;
+    }
+  }
+
+  String _statusLabel(String stato) {
+    if (stato.trim().isEmpty) return 'Nuova';
+
+    switch (stato.toUpperCase()) {
+      case 'IN_LAVORAZIONE':
+        return 'In lavorazione';
+      case 'RISOLTA':
+        return 'Risolta';
+      case 'CHIUSA':
+        return 'Chiusa';
+      case 'NUOVA':
+        return 'Nuova';
+      default:
+        return stato;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: lightBackground,
       body: SafeArea(
         child: isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+          child: CircularProgressIndicator(color: primaryBlue),
+        )
             : errorMessage != null
-                ? _buildError()
-                : RefreshIndicator(
-                    onRefresh: _loadData,
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          EasyTourHeader(
-                                                      showLogout: true,
-                                                      onLogoutTap: _logout,
-                                                    ),
-                                                    const SizedBox(height: 20),
-                          _buildTitle(),
-                          const SizedBox(height: 16),
-                          _buildStatCards(),
-                          const SizedBox(height: 20),
-                          _buildPlacesSection(),
-                          const SizedBox(height: 20),
-                          _buildFiltersSection(),
-                          const SizedBox(height: 20),
-                          _buildReportsSection(),
-                        ],
-                      ),
-                    ),
-                  ),
+            ? _buildError()
+            : RefreshIndicator(
+          color: primaryBlue,
+          onRefresh: _loadData,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                EasyTourHeader(
+                  showLogout: true,
+                  onLogoutTap: _logout,
+                ),
+                const SizedBox(height: 20),
+                _buildTitle(),
+                const SizedBox(height: 16),
+                _buildStatCards(),
+                const SizedBox(height: 20),
+                _buildPlacesSection(),
+                const SizedBox(height: 20),
+                _buildFiltersSection(),
+                const SizedBox(height: 20),
+                _buildReportsSection(),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -166,56 +352,47 @@ class _DashboardPageState extends State<DashboardPage> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
-            const SizedBox(height: 12),
-            Text(errorMessage ?? 'Errore',
+        child: Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.cloud_off,
+                size: 48,
+                color: Colors.grey,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                errorMessage ?? 'Errore',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadData,
-              style: ElevatedButton.styleFrom(backgroundColor: primaryBlue),
-              child: const Text('Riprova',
-                  style: TextStyle(color: Colors.white)),
-            ),
-          ],
+                style: const TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _loadData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryBlue,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Riprova'),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // --- Barra in alto con logo e logout ---
-  Widget _buildTopBar() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.location_on, color: orange, size: 28),
-            const SizedBox(width: 6),
-            const Text(
-              'EasyTour',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: primaryBlue,
-              ),
-            ),
-          ],
-        ),
-        IconButton(
-          icon: const Icon(Icons.logout, color: primaryBlue),
-          onPressed: _logout,
-          tooltip: 'Esci',
-        ),
-      ],
-    );
-  }
-
-  // --- Titolo + selettore Comune ---
   Widget _buildTitle() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -235,8 +412,11 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Analisi degli itinerari e feedback dei cittadini',
-                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                'Analisi degli itinerari, luoghi e segnalazioni utenti',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                ),
               ),
             ],
           ),
@@ -251,7 +431,11 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           child: Row(
             children: [
-              Icon(Icons.location_on, size: 18, color: primaryBlue),
+              const Icon(
+                Icons.location_on,
+                size: 18,
+                color: primaryBlue,
+              ),
               const SizedBox(width: 4),
               Text(
                 _nomeComune(),
@@ -264,17 +448,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  String _nomeComune() {
-    final id = widget.user.municipalityId ?? '';
-    if (id.isEmpty) return 'Comune';
-    // "comune_salerno" -> "Salerno"
-    final parte = id.replaceFirst('comune_', '');
-    return parte.isEmpty
-        ? 'Comune'
-        : parte[0].toUpperCase() + parte.substring(1);
-  }
-
-  // --- 4 card statistiche ---
   Widget _buildStatCards() {
     final cards = [
       _StatData(
@@ -318,7 +491,7 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _statCard(_StatData d) {
+  Widget _statCard(_StatData data) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -333,14 +506,18 @@ class _DashboardPageState extends State<DashboardPage> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: d.bg,
+              color: data.bg,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(d.icon, color: d.iconColor, size: 22),
+            child: Icon(
+              data.icon,
+              color: data.iconColor,
+              size: 22,
+            ),
           ),
           const SizedBox(height: 10),
           Text(
-            d.value,
+            data.value,
             style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -348,20 +525,22 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
           Text(
-            d.label,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            data.label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+            ),
           ),
         ],
       ),
     );
   }
 
-  // --- Sezione luoghi (più presenti + da valorizzare) ---
   Widget _buildPlacesSection() {
-    // Quanti elementi mostrare in base allo stato espanso.
     final topCount = _topPlacesExpanded
         ? topPlaces.length
         : (topPlaces.length > 3 ? 3 : topPlaces.length);
+
     final improveCount = _improveExpanded
         ? placesToImprove.length
         : (placesToImprove.length > 3 ? 3 : placesToImprove.length);
@@ -373,19 +552,22 @@ class _DashboardPageState extends State<DashboardPage> {
           child: topPlaces.isEmpty
               ? _emptyHint('Nessun itinerario salvato')
               : Column(
-                  children: [
-                    ...List.generate(
-                      topCount,
-                      (i) => _topPlaceRow(i + 1, topPlaces[i]),
-                    ),
-                    if (topPlaces.length > 3)
-                      _vediTuttiToggle(
-                        expanded: _topPlacesExpanded,
-                        onTap: () => setState(
-                            () => _topPlacesExpanded = !_topPlacesExpanded),
-                      ),
-                  ],
+            children: [
+              ...List.generate(
+                topCount,
+                    (index) => _topPlaceRow(index + 1, topPlaces[index]),
+              ),
+              if (topPlaces.length > 3)
+                _vediTuttiToggle(
+                  expanded: _topPlacesExpanded,
+                  onTap: () {
+                    setState(() {
+                      _topPlacesExpanded = !_topPlacesExpanded;
+                    });
+                  },
                 ),
+            ],
+          ),
         ),
         const SizedBox(height: 16),
         _card(
@@ -394,19 +576,22 @@ class _DashboardPageState extends State<DashboardPage> {
           child: placesToImprove.isEmpty
               ? _emptyHint('Nessun dato disponibile')
               : Column(
-                  children: [
-                    ...List.generate(
-                      improveCount,
-                      (i) => _improveRow(placesToImprove[i]),
-                    ),
-                    if (placesToImprove.length > 3)
-                      _vediTuttiToggle(
-                        expanded: _improveExpanded,
-                        onTap: () => setState(
-                            () => _improveExpanded = !_improveExpanded),
-                      ),
-                  ],
+            children: [
+              ...List.generate(
+                improveCount,
+                    (index) => _improveRow(placesToImprove[index]),
+              ),
+              if (placesToImprove.length > 3)
+                _vediTuttiToggle(
+                  expanded: _improveExpanded,
+                  onTap: () {
+                    setState(() {
+                      _improveExpanded = !_improveExpanded;
+                    });
+                  },
                 ),
+            ],
+          ),
         ),
       ],
     );
@@ -429,11 +614,18 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(expanded ? 'Vedi meno' : 'Vedi tutti',
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 13)),
+            Text(
+              expanded ? 'Vedi meno' : 'Vedi tutti',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
             const SizedBox(width: 2),
-            Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+            ),
           ],
         ),
       ),
@@ -448,11 +640,14 @@ class _DashboardPageState extends State<DashboardPage> {
           CircleAvatar(
             radius: 14,
             backgroundColor: const Color(0xFFE3EEF6),
-            child: Text('$rank',
-                style: TextStyle(
-                    color: primaryBlue,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13)),
+            child: Text(
+              '$rank',
+              style: const TextStyle(
+                color: primaryBlue,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           _placeThumb(place),
@@ -468,13 +663,16 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               Text(
                 '${place['presenze'] ?? 0}',
-                style: TextStyle(
-                    color: primaryBlue,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16),
+                style: const TextStyle(
+                  color: primaryBlue,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
-              Text('presenze',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+              Text(
+                'presenze',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              ),
             ],
           ),
         ],
@@ -498,8 +696,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 2),
-                Text('${place['presenze'] ?? 0} presenze',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                Text(
+                  '${place['presenze'] ?? 0} presenze',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
               ],
             ),
           ),
@@ -537,15 +737,19 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               );
             }
+
             final url = snapshot.data;
+
             if (url == null || url.isEmpty) {
               return const Icon(Icons.place, color: Colors.grey);
             }
+
             return Image.network(
               url,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
-                  const Icon(Icons.image, color: Colors.grey),
+              errorBuilder: (_, __, ___) {
+                return const Icon(Icons.image, color: Colors.grey);
+              },
             );
           },
         ),
@@ -553,38 +757,43 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // --- Grafico a barre filtri ---
   Widget _buildFiltersSection() {
+    final normalizedFilters = _normalizedFilters();
+
     return _card(
       title: 'Filtri più usati negli itinerari',
-      child: filters.isEmpty
+      child: normalizedFilters.isEmpty
           ? _emptyHint('Nessun filtro registrato')
-          : _barChart(),
+          : _barChart(normalizedFilters),
     );
   }
 
-  Widget _barChart() {
-    final maxVal = filters
-        .map((f) => (f['quanti'] ?? 0) as int)
+  Widget _barChart(List<Map<String, dynamic>> normalizedFilters) {
+    final maxVal = normalizedFilters
+        .map((filter) => _asInt(filter['quanti']))
         .fold<int>(1, (a, b) => a > b ? a : b);
 
     return Column(
-      children: filters.map((f) {
-        final val = (f['quanti'] ?? 0) as int;
-        final frazione = val / maxVal;
+      children: normalizedFilters.map((filter) {
+        final label = filter['filtro']?.toString() ?? '-';
+        final val = _asInt(filter['quanti']);
+        final fraction = val / maxVal;
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 7),
           child: Row(
             children: [
-              // Etichetta a sinistra, più stretta -> la barra parte prima.
               SizedBox(
-                width: 80,
+                width: 95,
                 child: Text(
-                  f['filtro']?.toString() ?? '-',
+                  label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[800]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[800],
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -592,11 +801,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final fullWidth = constraints.maxWidth;
-                    final barWidth = (fullWidth * frazione).clamp(0.0, fullWidth);
+                    final barWidth = (fullWidth * fraction).clamp(
+                      0.0,
+                      fullWidth,
+                    );
+
                     return Stack(
                       alignment: Alignment.centerLeft,
                       children: [
-                        // Binario di sfondo sottile.
                         Container(
                           height: 10,
                           decoration: BoxDecoration(
@@ -604,20 +816,19 @@ class _DashboardPageState extends State<DashboardPage> {
                             borderRadius: BorderRadius.circular(5),
                           ),
                         ),
-                        // Se 0 -> pallino blu all'inizio; altrimenti barra che cresce.
                         if (val == 0)
                           Container(
                             width: 10,
                             height: 10,
-                            decoration: const BoxDecoration(
-                              color: primaryBlue,
+                            decoration: BoxDecoration(
+                              color: primaryBlue.withOpacity(0.45),
                               shape: BoxShape.circle,
                             ),
                           )
                         else
                           Container(
                             height: 10,
-                            width: barWidth,
+                            width: barWidth < 14 ? 14 : barWidth,
                             decoration: BoxDecoration(
                               color: primaryBlue,
                               borderRadius: BorderRadius.circular(5),
@@ -630,7 +841,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               const SizedBox(width: 8),
               SizedBox(
-                width: 26,
+                width: 28,
                 child: Text(
                   '$val',
                   textAlign: TextAlign.right,
@@ -647,41 +858,221 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // --- Segnalazioni (placeholder) ---
   Widget _buildReportsSection() {
+    final visibleReports = _reportsExpanded ? reports : reports.take(3).toList();
+
     return _card(
       title: 'Segnalazioni recenti',
+      subtitle: 'Report inviati dagli utenti al Comune di ${_nomeComune()}',
       child: reports.isEmpty
           ? Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                children: [
-                  Icon(Icons.inbox, color: Colors.grey[400]),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Nessuna segnalazione ricevuta.',
-                      style: TextStyle(color: Colors.grey[600]),
-                    ),
-                  ),
-                ],
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.inbox, color: Colors.grey[400]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Nessuna segnalazione ricevuta.',
+                style: TextStyle(color: Colors.grey[600]),
               ),
-            )
-          : Column(
-              children: reports
-                  .take(3)
-                  .map((r) => ListTile(
-                        leading: const Icon(Icons.campaign,
-                            color: Color(0xFFE0556E)),
-                        title: Text(r['categoria']?.toString() ?? 'Segnalazione'),
-                        subtitle: Text(r['descrizione']?.toString() ?? ''),
-                      ))
-                  .toList(),
             ),
+          ],
+        ),
+      )
+          : Column(
+        children: [
+          ...visibleReports.map(_reportCard),
+          if (reports.length > 3)
+            _vediTuttiToggle(
+              expanded: _reportsExpanded,
+              onTap: () {
+                setState(() {
+                  _reportsExpanded = !_reportsExpanded;
+                });
+              },
+            ),
+        ],
+      ),
     );
   }
 
-  // --- Helper card generica ---
+  Widget _reportCard(Map<String, dynamic> report) {
+    final categoria = _asString(
+      report['categoria'] ?? report['category'],
+      fallback: 'Segnalazione',
+    );
+
+    final descrizione = _asString(
+      report['descrizione'] ?? report['description'],
+      fallback: 'Nessuna descrizione disponibile.',
+    );
+
+    final stato = _asString(
+      report['stato'] ?? report['status'],
+      fallback: 'NUOVA',
+    );
+
+    final placeName = _asString(
+      report['placeName'] ??
+          report['luogo'] ??
+          report['nomeLuogo'] ??
+          report['place'],
+      fallback: 'Luogo non specificato',
+    );
+
+    final username = _asString(
+      report['username'] ?? report['userEmail'] ?? report['userId'],
+      fallback: 'Utente',
+    );
+
+    final dataCreazione = _formatDate(
+      report['dataCreazione'] ?? report['createdAt'] ?? report['date'],
+    );
+
+    final statusColor = _statusColor(stato);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFBFB),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF3D7DD)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            height: 42,
+            width: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFBE2E8),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(
+              Icons.campaign_rounded,
+              color: Color(0xFFE0556E),
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        categoria,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: darkBlue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _statusLabel(stato),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  descrizione,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF374151),
+                    fontSize: 13,
+                    height: 1.3,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _reportInfoChip(
+                      icon: Icons.place_rounded,
+                      text: placeName,
+                      color: primaryBlue,
+                    ),
+                    _reportInfoChip(
+                      icon: Icons.person_rounded,
+                      text: username,
+                      color: orange,
+                    ),
+                    if (dataCreazione.isNotEmpty)
+                      _reportInfoChip(
+                        icon: Icons.schedule_rounded,
+                        text: dataCreazione,
+                        color: green,
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reportInfoChip({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 210),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _card({
     required String title,
     String? subtitle,
@@ -708,8 +1099,10 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           if (subtitle != null) ...[
             const SizedBox(height: 2),
-            Text(subtitle,
-                style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+            Text(
+              subtitle,
+              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            ),
           ],
           const SizedBox(height: 12),
           child,
@@ -721,7 +1114,10 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _emptyHint(String text) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Text(text, style: TextStyle(color: Colors.grey[500])),
+      child: Text(
+        text,
+        style: TextStyle(color: Colors.grey[500]),
+      ),
     );
   }
 }
