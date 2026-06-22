@@ -5,6 +5,12 @@ import 'package:http/http.dart' as http;
 import '../models/itinerary_stop.dart';
 import '../models/place.dart';
 import '../models/user.dart';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+
 
 class ApiService {
   /*
@@ -126,35 +132,71 @@ class ApiService {
     return url;
   }
 
-  Future<Map<String, dynamic>> saveTravelDiaryForStop({
-    required String userId,
-    required String stopId,
-    required String placeId,
-    required String placeName,
-    required int rating,
-    required String note,
-  }) async {
-    final url = Uri.parse('$baseUrl/travel-diary/save');
+  Future<String> uploadDiaryPhoto(File imageFile) async {
+    final url = Uri.parse('$baseUrl/travel-diary/upload-photo');
 
-    final response = await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'userId': userId,
-        'stopId': stopId,
-        'placeId': placeId,
-        'placeName': placeName,
-        'rating': rating,
-        'note': note,
-      }),
-    );
-
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+    // Deduci il MIME type dall'estensione
+    final ext = imageFile.path.toLowerCase();
+    MediaType contentType;
+    if (ext.endsWith('.png')) {
+      contentType = MediaType('image', 'png');
+    } else if (ext.endsWith('.webp')) {
+      contentType = MediaType('image', 'webp');
+    } else {
+      contentType = MediaType('image', 'jpeg');
     }
 
-    throw Exception('Errore salvataggio diario: ${response.statusCode} - ${response.body}');
+    final request = http.MultipartRequest('POST', url);
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'photo',
+        imageFile.path,
+        contentType: contentType,
+      ),
+    );
+
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['url'].toString();
+    }
+
+    throw Exception('Errore upload foto: ${response.statusCode} - ${response.body}');
   }
+
+  Future<Map<String, dynamic>> saveTravelDiaryForStop({
+      required String userId,
+      required String stopId,
+      required String placeId,
+      required String placeName,
+      required int rating,
+      required String note,
+      List<String> photos = const [],
+    }) async {
+      final url = Uri.parse('$baseUrl/travel-diary/save');
+
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'userId': userId,
+          'stopId': stopId,
+          'placeId': placeId,
+          'placeName': placeName,
+          'rating': rating,
+          'note': note,
+          'photos': photos,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+
+      throw Exception('Errore salvataggio diario: ${response.statusCode} - ${response.body}');
+    }
 
   Future<Map<String, dynamic>> createTravelReport({
     required String userId,

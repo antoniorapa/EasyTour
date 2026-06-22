@@ -273,7 +273,9 @@ router.get('/reports', async (req, res) => {
     const result = await session.run(
       `
       MATCH (operator:User {id: $operatorId})-[:MANAGES]->(m:Municipality)
-      MATCH (r:Report)-[:FOR_MUNICIPALITY]->(m)
+      MATCH (r:Report)
+      WHERE r.municipalityId = m.id
+         OR (r)-[:FOR_MUNICIPALITY]->(m)
       OPTIONAL MATCH (u:User)-[:CREATED_REPORT]->(r)
       OPTIONAL MATCH (r)-[:ABOUT_PLACE]->(p:Place)
       RETURN

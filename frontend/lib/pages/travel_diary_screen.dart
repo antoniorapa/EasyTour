@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../services/api_service.dart';
 import '../services/session_service.dart';
@@ -23,6 +26,7 @@ class TravelDiaryScreen extends StatefulWidget {
 
 class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
   final ApiService _apiService = ApiService();
+  final ImagePicker _picker = ImagePicker();
 
   static const Color primaryBlue = Color(0xFF005A8D);
   static const Color darkBlue = Color(0xFF003F63);
@@ -46,6 +50,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
   final TextEditingController _notesCtrl = TextEditingController();
   final TextEditingController _reportCtrl = TextEditingController();
 
+  // Lista di URL relativi delle foto (es. /uploads/xxx.jpg)
   final List<String> _photos = [];
 
   int _diaryRating = 0;
@@ -55,6 +60,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
   bool _isSavingDiary = false;
   bool _isSendingReport = false;
   bool _isDeletingReport = false;
+  bool _isUploadingPhoto = false;
 
   bool _diarySaved = false;
   bool _reportSent = false;
@@ -131,6 +137,18 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
           _notesCtrl.text = _asString(diary['note']);
           _diarySaved =
               _diaryRating > 0 || _notesCtrl.text.trim().isNotEmpty;
+
+          // Ricarica le foto salvate
+          _photos.clear();
+          final savedPhotos = diary['photos'];
+          if (savedPhotos is List) {
+            for (final p in savedPhotos) {
+              final url = p?.toString() ?? '';
+              if (url.isNotEmpty) {
+                _photos.add(url);
+              }
+            }
+          }
         }
 
         if (report is Map<String, dynamic>) {
@@ -155,6 +173,50 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
     }
   }
 
+  Future<void> _pickAndUploadPhoto() async {
+    try {
+      final XFile? picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+
+      if (picked == null) return; // utente ha annullato
+
+      setState(() {
+        _isUploadingPhoto = true;
+      });
+
+      final relativeUrl = await _apiService.uploadDiaryPhoto(
+        File(picked.path),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _photos.add(relativeUrl);
+        _diarySaved = false; // ci sono modifiche non salvate
+        _isUploadingPhoto = false;
+      });
+
+      _showSnack(
+        message: 'Foto caricata. Ricordati di salvare il diario.',
+        color: primaryBlue,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isUploadingPhoto = false;
+      });
+
+      _showSnack(
+        message: 'Errore durante il caricamento della foto: $e',
+        color: dangerRed,
+      );
+    }
+  }
+
   Future<void> _saveDiary() async {
     if (!_canUseDb) {
       _showSnack(
@@ -176,6 +238,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
         placeName: widget.stop.placeName,
         rating: _diaryRating,
         note: _notesCtrl.text.trim(),
+        photos: _photos,
       );
 
       if (!mounted) return;
@@ -742,22 +805,19 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
               scrollDirection: Axis.horizontal,
               children: [
                 ..._photos.map(
-                      (photo) => _PhotoThumbnail(
+                      (photoUrl) => _PhotoThumbnail(
+                    imageUrl: ApiService.resolveImageUrl(photoUrl),
                     onRemove: () {
                       setState(() {
-                        _photos.remove(photo);
+                        _photos.remove(photoUrl);
+                        _diarySaved = false;
                       });
                     },
                   ),
                 ),
                 _PhotoAddButton(
-                  onTap: () {
-                    setState(() {
-                      _photos.add(
-                        'photo_${DateTime.now().millisecondsSinceEpoch}',
-                      );
-                    });
-                  },
+                  isLoading: _isUploadingPhoto,
+                  onTap: _isUploadingPhoto ? null : _pickAndUploadPhoto,
                 ),
               ],
             ),
@@ -1114,9 +1174,11 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PhotoThumbnail extends StatelessWidget {
+  final String imageUrl;
   final VoidCallback onRemove;
 
   const _PhotoThumbnail({
+    required this.imageUrl,
     required this.onRemove,
   });
 
@@ -1128,17 +1190,26 @@ class _PhotoThumbnail extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       child: Stack(
         children: [
-          Container(
-            width: 76,
-            height: 76,
-            decoration: BoxDecoration(
-              color: const Color(0xFFDDEBFF),
-              borderRadius: BorderRadius.circular(13),
-            ),
-            child: const Icon(
-              Icons.photo_outlined,
-              color: Color(0xFF005A8D),
-              size: 28,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(13),
+            child: Image.network(
+              imageUrl,
+              width: 76,
+              height: 76,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDDEBFF),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.broken_image_outlined,
+                  color: Color(0xFF005A8D),
+                  size: 28,
+                ),
+              ),
             ),
           ),
           Positioned(
@@ -1168,10 +1239,12 @@ class _PhotoThumbnail extends StatelessWidget {
 }
 
 class _PhotoAddButton extends StatelessWidget {
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool isLoading;
 
   const _PhotoAddButton({
     required this.onTap,
+    this.isLoading = false,
   });
 
   @override
@@ -1188,25 +1261,36 @@ class _PhotoAddButton extends StatelessWidget {
           ),
           borderRadius: BorderRadius.circular(13),
         ),
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.camera_alt_outlined,
-              color: Color(0xFF6B7280),
-              size: 22,
-            ),
-            SizedBox(height: 3),
-            Text(
-              'Aggiungi',
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
+        child: isLoading
+            ? const Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF005A8D),
+                  ),
+                ),
+              )
+            : const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.camera_alt_outlined,
+                    color: Color(0xFF6B7280),
+                    size: 22,
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Aggiungi',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }

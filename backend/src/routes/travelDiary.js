@@ -1,8 +1,40 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 const { driver } = require('../db');
+
+const uploadDir = path.join(__dirname, "..", "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${uuidv4()}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const isImageMime = file.mimetype.startsWith("image/");
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isImageExt = [".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext);
+
+    if (isImageMime || isImageExt) {
+      cb(null, true);
+    } else {
+      cb(new Error("Il file non è un'immagine"));
+    }
+  },
+});
 
 
 
@@ -45,7 +77,7 @@ router.post("/save", async (req, res) => {
   const session = driver.session();
 
   try {
-    const { userId, stopId, placeId, placeName, rating, note } = req.body;
+    const { userId, stopId, placeId, placeName, rating, note, photos } = req.body;
 
     if (!userId || !stopId) {
       return res.status(400).json({
@@ -65,6 +97,7 @@ router.post("/save", async (req, res) => {
         d.placeName = $placeName,
         d.rating = $rating,
         d.note = $note,
+        d.photos = $photos,
         d.dataAggiornamento = datetime()
       MERGE (u)-[:WROTE_DIARY_ENTRY]->(d)
 
@@ -89,6 +122,7 @@ router.post("/save", async (req, res) => {
         placeName: placeName || "",
         rating: Number(rating || 0),
         note: note || "",
+        photos: Array.isArray(photos) ? photos : [],
         diaryId: uuidv4(),
       }
     );
@@ -132,6 +166,14 @@ router.post("/report", async (req, res) => {
       `
       MATCH (u:User {id: $userId})
 
+      // Comune ricavato dalla tappa -> itinerario
+      OPTIONAL MATCH (s:ItineraryStop {id: $stopId})<-[:HAS_STOP]-(:Itinerary)-[:ASSOCIATED_TO]->(mFromStop:Municipality)
+
+      // Fallback: dal Place, se esiste nel grafo
+      OPTIONAL MATCH (:Place {id: $placeId})-[:LOCATED_IN]->(mFromPlace:Municipality)
+
+      WITH u, s, coalesce(mFromStop, mFromPlace) AS m
+
       CREATE (r:Report {
         id: $reportId,
         userId: $userId,
@@ -142,25 +184,24 @@ router.post("/report", async (req, res) => {
         descrizione: $descrizione,
         stato: "NUOVA",
         fonte: "DIARIO_VIAGGIO",
+        municipalityId: CASE WHEN m IS NULL THEN null ELSE m.id END,
         dataCreazione: datetime()
       })
 
       MERGE (u)-[:CREATED_REPORT]->(r)
 
-      WITH r
-      OPTIONAL MATCH (s:ItineraryStop {id: $stopId})
+      WITH r, s, m
       FOREACH (_ IN CASE WHEN s IS NULL THEN [] ELSE [1] END |
         MERGE (r)-[:ABOUT_STOP]->(s)
       )
 
-      WITH r
-      OPTIONAL MATCH (p:Place {id: $placeId})
-      FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END |
-        MERGE (r)-[:ABOUT_PLACE]->(p)
+      WITH r, m
+      OPTIONAL MATCH (p2:Place {id: $placeId})
+      FOREACH (_ IN CASE WHEN p2 IS NULL THEN [] ELSE [1] END |
+        MERGE (r)-[:ABOUT_PLACE]->(p2)
       )
 
-      WITH r
-      OPTIONAL MATCH (p2:Place {id: $placeId})-[:LOCATED_IN]->(m:Municipality)
+      WITH r, m
       FOREACH (_ IN CASE WHEN m IS NULL THEN [] ELSE [1] END |
         MERGE (r)-[:FOR_MUNICIPALITY]->(m)
       )
@@ -225,6 +266,20 @@ router.delete("/report/:reportId/user/:userId", async (req, res) => {
   } finally {
     await session.close();
   }
+});
+
+router.post("/upload-photo", upload.single("photo"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "Nessun file ricevuto" });
+  }
+
+  // URL relativo: il client lo combina con baseUrl
+  const relativeUrl = `/uploads/${req.file.filename}`;
+
+  res.status(201).json({
+    message: "Foto caricata",
+    url: relativeUrl,
+  });
 });
 
 module.exports = router;
