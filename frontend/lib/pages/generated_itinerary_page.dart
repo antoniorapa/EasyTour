@@ -7,6 +7,7 @@ import '../models/place.dart';
 import '../services/api_service.dart';
 import '../services/session_service.dart';
 import 'place_detail_page.dart';
+import '../widgets/add_stop_sheet.dart';
 
 class GeneratedItineraryPage extends StatefulWidget {
   final List<ItineraryStop> initialStops;
@@ -363,211 +364,24 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
   }
 
   Future<void> _showAddStopSheet() async {
-    int selectedDay = 1;
-    final TextEditingController searchController = TextEditingController();
+      final result = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => AddStopSheet(
+          availablePlaces: widget.availablePlaces,
+          numeroGiorni: widget.numeroGiorni,
+        ),
+      );
 
-    searchResults = widget.availablePlaces;
+      if (result == null) return;
+      if (!mounted) return;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return StatefulBuilder(
-          builder: (modalContext, setModalState) {
-            Future<void> runSearch(String value) async {
-              setModalState(() {
-                isSearchingPlaces = true;
-              });
+      final place = result['place'] as Place;
+      final day = result['day'] as int;
 
-              try {
-                final cleanQuery = value.trim();
-
-                if (cleanQuery.isEmpty) {
-                  searchResults = widget.availablePlaces;
-                } else {
-                  searchResults =
-                  await apiService.searchGooglePlacesText(cleanQuery);
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Errore nella ricerca: $e'),
-                    ),
-                  );
-                }
-              } finally {
-                if (mounted) {
-                  setModalState(() {
-                    isSearchingPlaces = false;
-                  });
-                }
-              }
-            }
-
-            return Container(
-              decoration: const BoxDecoration(
-                color: lightBackground,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(32),
-                  topRight: Radius.circular(32),
-                ),
-              ),
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                top: 14,
-                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 16,
-              ),
-              child: SizedBox(
-                height: MediaQuery.of(modalContext).size.height * 0.78,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        height: 5,
-                        width: 52,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD0D9E2),
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Aggiungi tappa',
-                      style: TextStyle(
-                        color: darkBlue,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Scegli il giorno e aggiungi una nuova attrazione.',
-                      style: TextStyle(
-                        color: Colors.black54,
-                        fontSize: 13,
-                        height: 1.3,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<int>(
-                      value: selectedDay,
-                      decoration: _inputDecoration('Giorno'),
-                      items: List.generate(widget.numeroGiorni, (index) {
-                        final day = index + 1;
-
-                        return DropdownMenuItem<int>(
-                          value: day,
-                          child: Text('Giorno $day'),
-                        );
-                      }),
-                      onChanged: (value) {
-                        if (value == null) return;
-
-                        setModalState(() {
-                          selectedDay = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: searchController,
-                      decoration: _inputDecoration('Cerca attrazione').copyWith(
-                        hintText: 'Es. museo, castello, parco...',
-                        prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: primaryBlue,
-                        ),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.arrow_forward, color: orange),
-                          onPressed: () {
-                            runSearch(searchController.text);
-                          },
-                        ),
-                      ),
-                      onSubmitted: runSearch,
-                    ),
-                    const SizedBox(height: 12),
-                    if (isSearchingPlaces)
-                      const LinearProgressIndicator(
-                        color: orange,
-                        backgroundColor: softBlue,
-                      ),
-                    const SizedBox(height: 8),
-                    Expanded(
-                      child: searchResults.isEmpty
-                          ? const Center(
-                        child: Text('Nessun risultato trovato.'),
-                      )
-                          : ListView.builder(
-                        itemCount: searchResults.length,
-                        itemBuilder: (context, index) {
-                          final place = searchResults[index];
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(22),
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.all(12),
-                              title: Text(
-                                place.nome,
-                                style: const TextStyle(
-                                  color: darkBlue,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              subtitle: Text(
-                                _buildPlaceSubtitle(place),
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Container(
-                                height: 40,
-                                width: 40,
-                                decoration: BoxDecoration(
-                                  color: softOrange,
-                                  borderRadius: BorderRadius.circular(15),
-                                ),
-                                child: const Icon(
-                                  Icons.add_rounded,
-                                  color: orange,
-                                ),
-                              ),
-                              onTap: () {
-                                final selectedPlace = place;
-                                final day = selectedDay;
-
-                                Navigator.pop(bottomSheetContext);
-
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
-                                  if (!mounted) return;
-                                  _addStop(selectedPlace, day);
-                                });
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    searchController.dispose();
-  }
+      _addStop(place, day);
+    }
 
   Future<void> _saveItinerary() async {
     if (stops.isEmpty) {

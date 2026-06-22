@@ -190,16 +190,16 @@ router.get('/filters', async (req, res) => {
 
     const result = await session.run(
       `
-      MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(:Municipality {id: $municipalityId})
+      MATCH (i:Itinerary)-[:ASSOCIATED_TO]->(m:Municipality {id: $municipalityId})
       WITH
         CASE
-          WHEN i.filterType IS NULL OR i.filterType = '' OR i.filterType = 'none' OR i.filterType = 'Tutti' THEN 'Tutti'
+          WHEN i.filterType IS NULL OR i.filterType = '' OR toLower(i.filterType) = 'none' OR toLower(i.filterType) = 'tutti' THEN 'Tutti'
 
-          WHEN toLower(i.filterType) IN ['ho_solo_2_ore', '2 ore', 'ho solo 2 ore', 'solo 2 ore'] THEN 'Ho solo 2 ore'
+          WHEN toLower(i.filterType) IN ['ho_solo_2_ore', '2 ore', 'ho solo 2 ore', 'solo 2 ore', 'two_hours'] THEN 'Ho solo 2 ore'
 
           WHEN toLower(i.filterType) IN ['budget_limitato', 'budget limitato', 'budget'] THEN 'Budget limitato'
 
-          WHEN toLower(i.filterType) IN ['posti_nascosti', 'posti nascosti', 'nascosti', 'hidden gems'] THEN 'Posti nascosti'
+          WHEN toLower(i.filterType) IN ['posti_nascosti', 'posti nascosti', 'nascosti', 'hidden gems', 'hidden'] THEN 'Posti nascosti'
 
           ELSE i.filterType
         END AS filtroNormalizzato,

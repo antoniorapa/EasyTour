@@ -192,38 +192,40 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   String _filterLabelFromRaw(dynamic value) {
-    final raw = value?.toString().trim() ?? '';
+      final raw = value?.toString().trim() ?? '';
 
-    if (raw.isEmpty) return 'Tutti';
+      if (raw.isEmpty) return 'Tutti';
 
-    final lower = raw.toLowerCase();
+      final lower = raw.toLowerCase();
 
-    if (lower == 'none' || lower == 'tutti') {
-      return 'Tutti';
+      if (lower == 'none' || lower == 'tutti') {
+        return 'Tutti';
+      }
+
+      if (lower == 'ho_solo_2_ore' ||
+          lower == '2 ore' ||
+          lower == 'ho solo 2 ore' ||
+          lower == 'solo 2 ore' ||
+          lower == 'two_hours') {
+        return 'Ho solo 2 ore';
+      }
+
+      if (lower == 'budget_limitato' ||
+          lower == 'budget limitato' ||
+          lower == 'budget') {
+        return 'Budget limitato';
+      }
+
+      if (lower == 'posti_nascosti' ||
+          lower == 'posti nascosti' ||
+          lower == 'nascosti' ||
+          lower == 'hidden gems' ||
+          lower == 'hidden') {
+        return 'Posti nascosti';
+      }
+
+      return raw;
     }
-
-    if (lower == 'ho_solo_2_ore' ||
-        lower == '2 ore' ||
-        lower == 'ho solo 2 ore' ||
-        lower == 'solo 2 ore') {
-      return 'Ho solo 2 ore';
-    }
-
-    if (lower == 'budget_limitato' ||
-        lower == 'budget limitato' ||
-        lower == 'budget') {
-      return 'Budget limitato';
-    }
-
-    if (lower == 'posti_nascosti' ||
-        lower == 'posti nascosti' ||
-        lower == 'nascosti' ||
-        lower == 'hidden gems') {
-      return 'Posti nascosti';
-    }
-
-    return raw;
-  }
 
   List<Map<String, dynamic>> _normalizedFilters() {
     final Map<String, int> counts = {
