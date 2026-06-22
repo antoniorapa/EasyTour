@@ -702,7 +702,7 @@ class _StopImageState extends State<_StopImage> {
         return ClipRRect(
           borderRadius: BorderRadius.circular(13),
           child: Image.network(
-            imageUrl,
+            ApiService.resolveImageUrl(imageUrl),
             width: 76,
             height: 76,
             fit: BoxFit.cover,
@@ -833,7 +833,7 @@ class SavedStopDetailPage extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: Image.network(
-        stop.imageUrl,
+        ApiService.resolveImageUrl(stop.imageUrl),
         height: 190,
         width: double.infinity,
         fit: BoxFit.cover,

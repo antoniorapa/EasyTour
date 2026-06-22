@@ -18,8 +18,8 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-    //static const String baseUrl = 'http://192.168.1.13:3000';
-  static const String baseUrl = 'http://localhost:3000';
+    static const String baseUrl = 'http://192.168.1.9:3000';
+  //static const String baseUrl = 'http://localhost:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
 
@@ -116,6 +116,14 @@ class ApiService {
     }
 
     throw Exception('Errore caricamento diario: ${response.statusCode} - ${response.body}');
+  }
+
+  static String resolveImageUrl(String url) {
+    if (url.startsWith('https://upload.wikimedia.org/')) {
+      final encoded = Uri.encodeComponent(url);
+      return '$baseUrl/wiki/image-proxy?url=$encoded';
+    }
+    return url;
   }
 
   Future<Map<String, dynamic>> saveTravelDiaryForStop({

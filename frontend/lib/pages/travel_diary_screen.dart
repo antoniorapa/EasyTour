@@ -611,7 +611,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(13),
       child: Image.network(
-        widget.stop.imageUrl,
+        ApiService.resolveImageUrl(widget.stop.imageUrl),
         width: 76,
         height: 76,
         fit: BoxFit.cover,

@@ -1444,56 +1444,67 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     );
   }
 
-  Widget _buildStopImage(Place place) {
-    return FutureBuilder<String?>(
-      future: _getPreviewImageForPlace(place),
-      builder: (context, snapshot) {
-        final imageUrl = snapshot.data;
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _placeholderImage(
-            child: const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
-              ),
-            ),
-          );
-        }
-
-        if (imageUrl == null || imageUrl.isEmpty) {
-          return _placeholderImage(
-            child: const Icon(
-              Icons.location_on_rounded,
-              color: Colors.white,
-              size: 30,
-            ),
-          );
-        }
-
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Image.network(
-            imageUrl,
-            width: 76,
-            height: 76,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) {
-              return _placeholderImage(
-                child: const Icon(
-                  Icons.location_on_rounded,
-                  color: Colors.white,
-                  size: 30,
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
+  String _resolveImageUrl(String url) {
+    if (url.startsWith('https://upload.wikimedia.org/')) {
+      final encoded = Uri.encodeComponent(url);
+      return '${ApiService.baseUrl}/wiki/image-proxy?url=$encoded';
+    }
+    return url;
   }
+
+  Widget _buildStopImage(Place place) {
+      return FutureBuilder<String?>(
+        future: _getPreviewImageForPlace(place),
+        builder: (context, snapshot) {
+          final imageUrl = snapshot.data;
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return _placeholderImage(
+              child: const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+            );
+          }
+
+          if (imageUrl == null || imageUrl.isEmpty) {
+            return _placeholderImage(
+              child: const Icon(
+                Icons.location_on_rounded,
+                color: Colors.white,
+                size: 30,
+              ),
+            );
+          }
+
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Image.network(
+              _resolveImageUrl(imageUrl),
+              width: 76,
+              height: 76,
+              fit: BoxFit.cover,
+              // gli headers User-Agent qui non servono più per le Wiki
+              // (le serve già il proxy), ma puoi lasciarli per le altre fonti
+              errorBuilder: (_, __, ___) {
+                debugPrint('IMG FALLITA: $imageUrl');
+                return _placeholderImage(
+                  child: const Icon(
+                    Icons.location_on_rounded,
+                    color: Colors.white,
+                    size: 30,
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      );
+    }
 
   Widget _placeholderImage({required Widget child}) {
     return Container(

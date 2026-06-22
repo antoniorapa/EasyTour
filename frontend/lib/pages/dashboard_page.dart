@@ -745,7 +745,7 @@ class _DashboardPageState extends State<DashboardPage> {
             }
 
             return Image.network(
-              url,
+              ApiService.resolveImageUrl(url),
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) {
                 return const Icon(Icons.image, color: Colors.grey);

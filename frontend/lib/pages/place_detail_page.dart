@@ -362,7 +362,7 @@ class _PlaceDetailPageState extends State<PlaceDetailPage> {
               },
               itemBuilder: (context, index) {
                 return Image.network(
-                  imageUrls[index],
+                  ApiService.resolveImageUrl(imageUrls[index]),
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) {
                     return Container(
