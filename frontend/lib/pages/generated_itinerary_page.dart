@@ -19,6 +19,12 @@ class GeneratedItineraryPage extends StatefulWidget {
   final String municipalityId;
   final String municipalityName;
 
+  // Centro di ricerca (Comune / posizione attuale / punto scelto sulla mappa).
+  // È il punto di partenza usato dall'algoritmo Nearest Neighbor per ordinare
+  // le tappe di OGNI giorno.
+  final double centerLatitude;
+  final double centerLongitude;
+
   const GeneratedItineraryPage({
     super.key,
     required this.initialStops,
@@ -29,6 +35,8 @@ class GeneratedItineraryPage extends StatefulWidget {
     required this.minutiDisponibiliAlGiorno,
     required this.municipalityId,
     required this.municipalityName,
+    required this.centerLatitude,
+    required this.centerLongitude,
   });
 
   @override
@@ -121,35 +129,136 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     return stop.place.id;
   }
 
-  void _recalculateItinerary() {
-    if (stops.isEmpty) return;
+  // ---------------------------------------------------------------------------
+  // NEAREST NEIGHBOR
+  //
+  // Dato un insieme di tappe, le ordina con l'euristica del vicino più vicino
+  // (Nearest Neighbor) partendo dal centro di ricerca:
+  //   1. si parte dal centro (centerLatitude/centerLongitude);
+  //   2. tra le tappe non ancora visitate si sceglie quella a distanza
+  //      haversine minima dal punto corrente;
+  //   3. la si aggiunge al percorso e diventa il nuovo punto corrente;
+  //   4. si ripete finché non restano tappe.
+  // Restituisce le tappe riordinate (senza ricalcolare tempi/distanze: quello
+  // avviene a valle, in _rebuildTimings).
+  // ---------------------------------------------------------------------------
+  List<ItineraryStop> _nearestNeighborOrder(List<ItineraryStop> dayStops) {
+    if (dayStops.length <= 1) {
+      return List<ItineraryStop>.from(dayStops);
+    }
 
-    final recalculatedStops = <ItineraryStop>[];
+    final remaining = List<ItineraryStop>.from(dayStops);
+    final ordered = <ItineraryStop>[];
 
-    int currentDay = 1;
-    int usedMinutesInCurrentDay = 0;
-    int globalOrder = 1;
+    // Punto di partenza: il centro di ricerca.
+    double currentLat = widget.centerLatitude;
+    double currentLng = widget.centerLongitude;
 
-    double? previousLat;
-    double? previousLng;
+    while (remaining.isNotEmpty) {
+      int bestIndex = 0;
+      double bestDistance = double.infinity;
 
-    for (final oldStop in stops) {
-      final place = oldStop.place;
-
-      double distanceKm = 0;
-      int arrivalMinutes = 0;
-
-      if (previousLat != null && previousLng != null) {
-        distanceKm = _calculateDistanceKm(
-          previousLat,
-          previousLng,
+      for (int i = 0; i < remaining.length; i++) {
+        final place = remaining[i].place;
+        final distance = _calculateDistanceKm(
+          currentLat,
+          currentLng,
           place.latitudine,
           place.longitudine,
         );
 
-        arrivalMinutes = _estimateArrivalMinutes(distanceKm);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = i;
+        }
       }
 
+      final chosen = remaining.removeAt(bestIndex);
+      ordered.add(chosen);
+
+      currentLat = chosen.place.latitudine;
+      currentLng = chosen.place.longitudine;
+    }
+
+    return ordered;
+  }
+
+  // Dato un giorno e la sua lista di tappe già ordinate, ricalcola distanze,
+  // tempi di arrivo e di visita. La prima tappa parte dal centro di ricerca,
+  // quindi ha anch'essa un tempo di arrivo dal centro.
+  List<ItineraryStop> _rebuildTimings({
+    required List<ItineraryStop> orderedDayStops,
+    required int day,
+    required int startOrder,
+  }) {
+    final result = <ItineraryStop>[];
+
+    double previousLat = widget.centerLatitude;
+    double previousLng = widget.centerLongitude;
+    int order = startOrder;
+
+    for (final stop in orderedDayStops) {
+      final place = stop.place;
+
+      final distanceKm = _calculateDistanceKm(
+        previousLat,
+        previousLng,
+        place.latitudine,
+        place.longitudine,
+      );
+
+      final arrivalMinutes = _estimateArrivalMinutes(distanceKm);
+      final visitMinutes = _estimateVisitTimeMinutes(place);
+
+      result.add(
+        stop.copyWith(
+          ordine: order,
+          giorno: day,
+          tempoArrivoStimato: arrivalMinutes,
+          tempoVisitaStimato: visitMinutes,
+          tempoPausaStimato: 0,
+          distanzaDalPuntoPrecedenteKm:
+          double.parse(distanceKm.toStringAsFixed(2)),
+        ),
+      );
+
+      order++;
+      previousLat = place.latitudine;
+      previousLng = place.longitudine;
+    }
+
+    return result;
+  }
+
+  // Generazione iniziale: distribuisce le tappe nei giorni rispettando il
+  // monte ore giornaliero e, per ciascun giorno, le ordina con Nearest
+  // Neighbor a partire dal centro di ricerca.
+  void _recalculateItinerary() {
+    if (stops.isEmpty) return;
+
+    // 1) Assegnazione delle tappe ai giorni rispettando il tempo disponibile.
+    //    L'ordine di scorrimento è quello in arrivo da SearchPage.
+    final stopsByDay = <int, List<ItineraryStop>>{};
+    for (int day = 1; day <= widget.numeroGiorni; day++) {
+      stopsByDay[day] = [];
+    }
+
+    int currentDay = 1;
+    int usedMinutesInCurrentDay = 0;
+
+    double previousLat = widget.centerLatitude;
+    double previousLng = widget.centerLongitude;
+
+    for (final stop in stops) {
+      final place = stop.place;
+
+      final distanceKm = _calculateDistanceKm(
+        previousLat,
+        previousLng,
+        place.latitudine,
+        place.longitudine,
+      );
+      final arrivalMinutes = _estimateArrivalMinutes(distanceKm);
       final visitMinutes = _estimateVisitTimeMinutes(place);
       final stopBaseMinutes = arrivalMinutes + visitMinutes;
 
@@ -159,83 +268,67 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
               widget.minutiDisponibiliAlGiorno) {
         currentDay++;
         usedMinutesInCurrentDay = 0;
-        previousLat = null;
-        previousLng = null;
-        distanceKm = 0;
-        arrivalMinutes = 0;
+        // All'inizio di un nuovo giorno si riparte dal centro.
+        previousLat = widget.centerLatitude;
+        previousLng = widget.centerLongitude;
       }
 
-      recalculatedStops.add(
-        oldStop.copyWith(
-          ordine: globalOrder,
-          giorno: currentDay,
-          tempoArrivoStimato: arrivalMinutes,
-          tempoVisitaStimato: visitMinutes,
-          tempoPausaStimato: 0,
-          distanzaDalPuntoPrecedenteKm:
-          double.parse(distanceKm.toStringAsFixed(2)),
-        ),
-      );
+      stopsByDay[currentDay]!.add(stop);
 
-      globalOrder++;
-      usedMinutesInCurrentDay += arrivalMinutes + visitMinutes;
-
+      usedMinutesInCurrentDay += stopBaseMinutes;
       previousLat = place.latitudine;
       previousLng = place.longitudine;
     }
 
-    stops = recalculatedStops;
+    // 2) Per ogni giorno: Nearest Neighbor dal centro + ricalcolo tempi.
+    final rebuilt = <ItineraryStop>[];
+    int globalOrder = 1;
+
+    for (int day = 1; day <= widget.numeroGiorni; day++) {
+      final dayStops = stopsByDay[day]!;
+      if (dayStops.isEmpty) continue;
+
+      final ordered = _nearestNeighborOrder(dayStops);
+      final timed = _rebuildTimings(
+        orderedDayStops: ordered,
+        day: day,
+        startOrder: globalOrder,
+      );
+
+      rebuilt.addAll(timed);
+      globalOrder += timed.length;
+    }
+
+    stops = rebuilt;
     _redistributePauses();
   }
 
+  // Ricalcolo dopo modifiche manuali (sposta giorno / rimuovi / riordina).
+  // Rispetta l'assegnazione ai giorni decisa dall'utente, ma applica comunque
+  // Nearest Neighbor dal centro all'interno di ciascun giorno, così il
+  // percorso resta sempre coerente con l'algoritmo richiesto.
   void _recalculateManualDays() {
     if (stops.isEmpty) return;
 
-    final recalculatedStops = <ItineraryStop>[];
+    final rebuilt = <ItineraryStop>[];
     int globalOrder = 1;
 
     for (int day = 1; day <= widget.numeroGiorni; day++) {
       final dayStops = stops.where((stop) => stop.giorno == day).toList();
+      if (dayStops.isEmpty) continue;
 
-      double? previousLat;
-      double? previousLng;
+      final ordered = _nearestNeighborOrder(dayStops);
+      final timed = _rebuildTimings(
+        orderedDayStops: ordered,
+        day: day,
+        startOrder: globalOrder,
+      );
 
-      for (final oldStop in dayStops) {
-        final place = oldStop.place;
-
-        double distanceKm = 0;
-        int arrivalMinutes = 0;
-
-        if (previousLat != null && previousLng != null) {
-          distanceKm = _calculateDistanceKm(
-            previousLat,
-            previousLng,
-            place.latitudine,
-            place.longitudine,
-          );
-
-          arrivalMinutes = _estimateArrivalMinutes(distanceKm);
-        }
-
-        recalculatedStops.add(
-          oldStop.copyWith(
-            ordine: globalOrder,
-            giorno: day,
-            tempoArrivoStimato: arrivalMinutes,
-            tempoVisitaStimato: _estimateVisitTimeMinutes(place),
-            distanzaDalPuntoPrecedenteKm:
-            double.parse(distanceKm.toStringAsFixed(2)),
-            tempoPausaStimato: 0,
-          ),
-        );
-
-        globalOrder++;
-        previousLat = place.latitudine;
-        previousLng = place.longitudine;
-      }
+      rebuilt.addAll(timed);
+      globalOrder += timed.length;
     }
 
-    stops = recalculatedStops;
+    stops = rebuilt;
     _redistributePauses();
   }
 
@@ -294,6 +387,8 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       stops[previousIndex] = stops[index];
       stops[index] = temp;
 
+      // Nota: l'ordine manuale su/giù viene comunque normalizzato da
+      // Nearest Neighbor dentro lo stesso giorno.
       _recalculateManualDays();
     });
   }
@@ -719,7 +814,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
                 ),
                 SizedBox(height: 4),
                 Text(
-                  'Puoi rimuovere, aggiungere o riordinare le tappe.',
+                  'Percorso ottimizzato (vicino più vicino). Puoi rimuovere, aggiungere o spostare tappe tra i giorni.',
                   style: TextStyle(
                     color: Color(0xFF4A5568),
                     fontSize: 13,
@@ -1394,7 +1489,7 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
             child: Text(
               isOverLimit
                   ? 'Hai superato il tempo disponibile: è consentito, ma l’itinerario risulterà più lungo.'
-                  : 'Gli orari di arrivo e le permanenze si aggiornano automaticamente dopo ogni modifica.',
+                  : 'Ogni giorno parte dal punto di ricerca e segue il percorso più vicino. Gli orari si aggiornano dopo ogni modifica.',
               style: const TextStyle(
                 color: Color(0xFF243B53),
                 fontSize: 14,

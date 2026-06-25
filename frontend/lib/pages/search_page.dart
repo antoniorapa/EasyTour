@@ -64,6 +64,10 @@ class _SearchPageState extends State<SearchPage> {
   String? errorMessage;
   String? locationMessage;
 
+  // Messaggio informativo mostrato quando un filtro non restituisce nulla
+  // o quando produce un risultato che merita una spiegazione.
+  String? filterMessage;
+
   List<Place> allGooglePlaces = [];
   List<Place> places = [];
 
@@ -184,6 +188,7 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       isLoading = true;
       errorMessage = null;
+      filterMessage = null;
       places = [];
       allGooglePlaces = [];
       municipalitySelected = false;
@@ -323,6 +328,7 @@ class _SearchPageState extends State<SearchPage> {
       isLoading = true;
       isSelectingPoint = false;
       errorMessage = null;
+      filterMessage = null;
       places = [];
       allGooglePlaces = [];
       selectedFilter = 'none';
@@ -456,6 +462,7 @@ class _SearchPageState extends State<SearchPage> {
       places = [];
       allGooglePlaces = [];
       errorMessage = null;
+      filterMessage = null;
 
       searchCenterLabel = 'Seleziona un punto';
       searchMode = 'Scelta sulla mappa';
@@ -501,6 +508,7 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       isLoading = true;
       errorMessage = null;
+      filterMessage = null;
       places = [];
       allGooglePlaces = [];
     });
@@ -536,7 +544,9 @@ class _SearchPageState extends State<SearchPage> {
 
       setState(() {
         allGooglePlaces = placesWithDistance;
-        places = _applyFilter(placesWithDistance, selectedFilter);
+        final filterResult = _applyFilter(placesWithDistance, selectedFilter);
+        places = filterResult.places;
+        filterMessage = filterResult.message;
       });
 
       await _animateMapToCurrentArea();
@@ -557,62 +567,215 @@ class _SearchPageState extends State<SearchPage> {
     }
   }
 
-  List<Place> _applyFilter(List<Place> sourcePlaces, String filterType) {
-    final filtered = List<Place>.from(sourcePlaces);
+  // ---------------------------------------------------------------------------
+  // FILTRI
+  //
+  // Ogni filtro ora:
+  //  - lavora su una copia ordinata della sorgente
+  //  - usa criteri normalizzati e robusti (rating/recensioni possono essere 0)
+  //  - ha un fallback: se l'esito restringe a 0 elementi, mantiene comunque
+  //    un risultato sensato e segnala il motivo tramite `message`, così
+  //    l'utente capisce sempre che il filtro ha agito.
+  // ---------------------------------------------------------------------------
 
-    if (filterType == 'none') {
-      return filtered;
+  _FilterResult _applyFilter(List<Place> sourcePlaces, String filterType) {
+    final source = List<Place>.from(sourcePlaces);
+
+    if (source.isEmpty) {
+      return const _FilterResult(places: [], message: null);
     }
 
-    if (filterType == 'two_hours') {
-      filtered.sort((a, b) {
+    switch (filterType) {
+      case 'two_hours':
+        return _filterTwoHours(source);
+      case 'budget':
+        return _filterBudget(source);
+      case 'hidden':
+        return _filterHidden(source);
+      case 'none':
+      default:
+      // "Tutti": ordinati per distanza crescente (più vicini prima).
+        final all = List<Place>.from(source)
+          ..sort((a, b) {
+            final da = a.distanzaKm ?? 9999;
+            final db = b.distanzaKm ?? 9999;
+            return da.compareTo(db);
+          });
+        return _FilterResult(places: all, message: null);
+    }
+  }
+
+  // "Ho solo 2 ore": i posti migliori e più vicini, così da poterli visitare
+  // in poco tempo. Ordina per un punteggio combinato (rating + vicinanza) e
+  // prende i primi 3. Se nessuno ha rating, ripiega sull'ordine per distanza.
+  _FilterResult _filterTwoHours(List<Place> source) {
+    final list = List<Place>.from(source);
+
+    final hasAnyRating = list.any((p) => p.rating > 0);
+
+    list.sort((a, b) {
+      if (hasAnyRating) {
         final ratingCompare = b.rating.compareTo(a.rating);
         if (ratingCompare != 0) return ratingCompare;
+      }
+      final da = a.distanzaKm ?? 9999;
+      final db = b.distanzaKm ?? 9999;
+      return da.compareTo(db);
+    });
 
-        final distanceA = a.distanzaKm ?? 9999;
-        final distanceB = b.distanzaKm ?? 9999;
-        return distanceA.compareTo(distanceB);
+    final top = list.take(3).toList();
+
+    final message = top.isEmpty
+        ? 'Nessuna attrazione disponibile per una visita breve.'
+        : (hasAnyRating
+        ? 'Le 3 attrazioni migliori e più comode per una visita di ~2 ore.'
+        : 'Le 3 attrazioni più vicine per una visita di ~2 ore (rating non disponibile).');
+
+    return _FilterResult(places: top, message: message);
+  }
+
+  // "Budget": attrazioni tipicamente gratuite o economiche (parchi, chiese,
+  // piazze, monumenti, musei...). Il match avviene su categoria normalizzata,
+  // riconoscendo sia i tipi Google in inglese sia i termini italiani.
+  // Se nessuna categoria combacia (categorie generiche tipo
+  // "point_of_interest"), ripiega escludendo le categorie tipicamente a
+  // pagamento e segnala l'approssimazione.
+  _FilterResult _filterBudget(List<Place> source) {
+    const budgetKeywords = [
+      // EN
+      'park', 'garden', 'tourist_attraction', 'tourist attraction',
+      'historical_landmark', 'historical landmark', 'landmark',
+      'plaza', 'square', 'church', 'place_of_worship', 'museum',
+      'natural_feature', 'point_of_interest',
+      // IT
+      'parco', 'giardino', 'attrazione', 'monumento', 'storico',
+      'piazza', 'chiesa', 'luogo di culto', 'museo', 'belvedere',
+      'lungomare', 'fontana', 'villa',
+    ];
+
+    const paidKeywords = [
+      'restaurant', 'ristorante', 'bar', 'cafe', 'caffè',
+      'lodging', 'hotel', 'albergo', 'spa', 'amusement_park',
+      'parco divertimenti', 'store', 'negozio', 'shopping',
+      'night_club', 'discoteca',
+    ];
+
+    String norm(String s) => s.toLowerCase().trim();
+
+    final matched = source.where((place) {
+      final cat = norm(place.categoria);
+      return budgetKeywords.any((k) => cat.contains(norm(k)));
+    }).toList();
+
+    if (matched.isNotEmpty) {
+      matched.sort((a, b) {
+        final da = a.distanzaKm ?? 9999;
+        final db = b.distanzaKm ?? 9999;
+        return da.compareTo(db);
+      });
+      return _FilterResult(
+        places: matched,
+        message:
+        'Attrazioni a basso costo o gratuite (parchi, chiese, monumenti, musei...).',
+      );
+    }
+
+    // Fallback: escludi ciò che è tipicamente a pagamento.
+    final excludedPaid = source.where((place) {
+      final cat = norm(place.categoria);
+      return !paidKeywords.any((k) => cat.contains(norm(k)));
+    }).toList()
+      ..sort((a, b) {
+        final da = a.distanzaKm ?? 9999;
+        final db = b.distanzaKm ?? 9999;
+        return da.compareTo(db);
       });
 
-      return filtered.take(3).toList();
+    if (excludedPaid.isNotEmpty) {
+      return _FilterResult(
+        places: excludedPaid,
+        message:
+        'Categorie poco dettagliate: mostro tutte le attrazioni escluse quelle tipicamente a pagamento.',
+      );
     }
 
-    if (filterType == 'budget') {
-      final budgetKeywords = [
-        'park',
-        'garden',
-        'tourist attraction',
-        'historical landmark',
-        'plaza',
-        'square',
-        'church',
-        'museum',
-      ];
+    // Ultimo fallback: mostra tutto, ma avvisa.
+    final all = List<Place>.from(source)
+      ..sort((a, b) {
+        final da = a.distanzaKm ?? 9999;
+        final db = b.distanzaKm ?? 9999;
+        return da.compareTo(db);
+      });
+    return _FilterResult(
+      places: all,
+      message:
+      'Impossibile stimare il costo dalle categorie disponibili: mostro tutte le attrazioni.',
+    );
+  }
 
-      return filtered.where((place) {
-        final category = place.categoria.toLowerCase();
+  // "Posti nascosti": gemme poco recensite ma di buona qualità. Considera
+  // "nascosto" un posto con poche recensioni; tra questi privilegia quelli
+  // con rating più alto. Se le recensioni non sono disponibili (tutte 0),
+  // ripiega sui posti più lontani dal centro (meno turistici) e segnala.
+  _FilterResult _filterHidden(List<Place> source) {
+    final list = List<Place>.from(source);
 
-        return budgetKeywords.any(
-              (keyword) => category.contains(keyword),
-        );
+    final hasReviewData = list.any((p) => p.numeroRecensioni > 0);
+
+    if (hasReviewData) {
+      // Soglia dinamica: consideriamo "nascosti" i posti sotto la mediana
+      // delle recensioni (con un tetto di sicurezza), ma con almeno una
+      // valutazione decente quando disponibile.
+      final reviewed =
+      list.where((p) => p.numeroRecensioni > 0).map((p) => p.numeroRecensioni).toList()
+        ..sort();
+      final median = reviewed.isEmpty
+          ? 0
+          : reviewed[reviewed.length ~/ 2];
+      final threshold = max(50, median);
+
+      final hidden = list.where((p) {
+        // Tieni i poco recensiti; se non ha recensioni lo includiamo comunque
+        // come potenziale gemma sconosciuta.
+        return p.numeroRecensioni == 0 || p.numeroRecensioni <= threshold;
       }).toList();
-    }
 
-    if (filterType == 'hidden') {
-      filtered.sort((a, b) {
-        final reviewCompare = a.numeroRecensioni.compareTo(
-          b.numeroRecensioni,
-        );
-
+      hidden.sort((a, b) {
+        // Prima i meno recensiti, poi i meglio valutati.
+        final reviewCompare =
+        a.numeroRecensioni.compareTo(b.numeroRecensioni);
         if (reviewCompare != 0) return reviewCompare;
-
         return b.rating.compareTo(a.rating);
       });
 
-      return filtered.take(5).toList();
+      final top = hidden.take(5).toList();
+
+      if (top.isNotEmpty) {
+        return _FilterResult(
+          places: top,
+          message:
+          'Posti meno conosciuti (poche recensioni) ma interessanti.',
+        );
+      }
     }
 
-    return filtered;
+    // Fallback: nessun dato sulle recensioni. Privilegiamo i posti più
+    // lontani dal centro, statisticamente meno battuti dal turismo di massa.
+    final byDistanceDesc = List<Place>.from(list)
+      ..sort((a, b) {
+        final da = a.distanzaKm ?? 0;
+        final db = b.distanzaKm ?? 0;
+        return db.compareTo(da);
+      });
+
+    final top = byDistanceDesc.take(5).toList();
+
+    return _FilterResult(
+      places: top,
+      message: top.isEmpty
+          ? 'Nessun posto nascosto individuabile.'
+          : 'Numero recensioni non disponibile: mostro i 5 posti più defilati dal centro.',
+    );
   }
 
   Future<void> _onRadiusChanged(int radius) async {
@@ -634,10 +797,30 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
 
+    if (allGooglePlaces.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nessuna attrazione da filtrare.'),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       selectedFilter = filterType;
-      places = _applyFilter(allGooglePlaces, filterType);
+      final result = _applyFilter(allGooglePlaces, filterType);
+      places = result.places;
+      filterMessage = result.message;
     });
+
+    if (filterMessage != null && filterMessage!.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(filterMessage!),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
   }
 
   void enableManualPointSelection() {
@@ -676,6 +859,7 @@ class _SearchPageState extends State<SearchPage> {
       searchMode = 'Verifica punto selezionato';
       searchCenterLabel = 'Punto selezionato sulla mappa';
       selectedFilter = 'none';
+      filterMessage = null;
       locationMessage = 'Controllo il Comune del punto selezionato...';
       isLoading = true;
       errorMessage = null;
@@ -1019,6 +1203,8 @@ class _SearchPageState extends State<SearchPage> {
             minutiDisponibiliAlGiorno: oreDisponibiliAlGiorno * 60,
             municipalityId: selectedMunicipalityId!,
             municipalityName: selectedMunicipalityName ?? 'Comune selezionato',
+            centerLatitude: selectedLatitude!,
+            centerLongitude: selectedLongitude!,
           ),
         ),
       );
@@ -1337,6 +1523,8 @@ class _SearchPageState extends State<SearchPage> {
                     children: [
                       _buildSearchCard(),
                       if (canUseApp) _buildFilterSection(),
+                      if (canUseApp && filterMessage != null)
+                        _buildFilterMessage(),
                       if (canShowMap) _buildMapCard(),
                       if (canUseApp) _buildPlacesHeader(),
                       if (canUseApp) _buildPlacesList(),
@@ -1666,6 +1854,39 @@ class _SearchPageState extends State<SearchPage> {
           _filterChip('Budget', 'budget', Icons.savings_rounded),
           _filterChip('Posti nascosti', 'hidden', Icons.explore_rounded),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterMessage() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+        decoration: BoxDecoration(
+          color: softBlue,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFD6E6EF)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded,
+                color: primaryBlue, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                filterMessage!,
+                style: const TextStyle(
+                  color: darkBlue,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2246,4 +2467,14 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
   }
+}
+
+/// Risultato dell'applicazione di un filtro: la lista di luoghi e un
+/// eventuale messaggio esplicativo da mostrare all'utente (es. quando il
+/// filtro ha dovuto usare un fallback perché i dati non erano sufficienti).
+class _FilterResult {
+  final List<Place> places;
+  final String? message;
+
+  const _FilterResult({required this.places, this.message});
 }
