@@ -189,6 +189,8 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 
       final relativeUrl = await _apiService.uploadDiaryPhoto(
         File(picked.path),
+        userId: _userId,
+        stopId: widget.stop.id,
       );
 
       if (!mounted) return;

@@ -132,7 +132,11 @@ class ApiService {
     return url;
   }
 
-  Future<String> uploadDiaryPhoto(File imageFile) async {
+  Future<String> uploadDiaryPhoto(
+    File imageFile, {
+    required String userId,
+    required String stopId,
+  }) async {
     final url = Uri.parse('$baseUrl/travel-diary/upload-photo');
 
     // Deduci il MIME type dall'estensione
@@ -147,6 +151,11 @@ class ApiService {
     }
 
     final request = http.MultipartRequest('POST', url);
+
+    // Campi obbligatori per collegare la foto al DiaryEntry
+    request.fields['userId'] = userId;
+    request.fields['stopId'] = stopId;
+
     request.files.add(
       await http.MultipartFile.fromPath(
         'photo',
@@ -160,7 +169,9 @@ class ApiService {
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['url'].toString();
+      // Il backend ora risponde con { message, photo: { id, url, contentType } }
+      final photo = data['photo'] as Map<String, dynamic>;
+      return photo['url'].toString();
     }
 
     throw Exception('Errore upload foto: ${response.statusCode} - ${response.body}');
