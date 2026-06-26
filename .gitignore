@@ -18,5 +18,6 @@ backend/.env
 Thumbs.db
 
 backend/src/uploads/
+
 # Firebase
 backend/src/config/serviceAccountKey.json
