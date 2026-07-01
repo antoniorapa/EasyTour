@@ -24,7 +24,7 @@ class ApiService {
     usa l'IP del PC nella stessa rete Wi-Fi, ad esempio:
    'http://10.195.229.82:3000'
   */
-    static const String baseUrl = 'http://192.168.1.13:3000';
+    static const String baseUrl = 'http://192.168.1.18:3000';
   //static const String baseUrl = 'http://localhost:3000';
   Future<Map<String, dynamic>> searchMunicipalityByName(String query) async {
     final encodedQuery = Uri.encodeQueryComponent(query);
@@ -176,6 +176,57 @@ class ApiService {
 
     throw Exception('Errore upload foto: ${response.statusCode} - ${response.body}');
   }
+
+  Future<List<Map<String, String>>> getDiaryPhotos({
+  required String userId,
+  required String stopId,
+}) async {
+  final url = Uri.parse(
+    '$baseUrl/travel-diary/stop/${Uri.encodeComponent(stopId)}/user/${Uri.encodeComponent(userId)}/photos',
+  );
+
+  final response = await http.get(
+    url,
+    headers: {'Content-Type': 'application/json'},
+  );
+
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final list = data['photos'];
+    if (list is List) {
+      return list.map((p) {
+        final m = p as Map<String, dynamic>;
+        return {
+          'id': m['id']?.toString() ?? '',
+          'url': m['url']?.toString() ?? '',
+        };
+      }).where((m) => m['url']!.isNotEmpty).toList();
+    }
+    return [];
+  }
+
+  throw Exception('Errore caricamento foto: ${response.statusCode} - ${response.body}');
+}
+
+Future<void> deleteDiaryPhoto({
+  required String userId,
+  required String photoId,
+}) async {
+  final url = Uri.parse(
+    '$baseUrl/travel-diary/photo/${Uri.encodeComponent(photoId)}/user/${Uri.encodeComponent(userId)}',
+  );
+
+  final response = await http.delete(
+    url,
+    headers: {'Content-Type': 'application/json'},
+  );
+
+  if (response.statusCode == 200 || response.statusCode == 204) {
+    return;
+  }
+
+  throw Exception('Errore eliminazione foto: ${response.statusCode} - ${response.body}');
+}
 
   Future<Map<String, dynamic>> saveTravelDiaryForStop({
       required String userId,

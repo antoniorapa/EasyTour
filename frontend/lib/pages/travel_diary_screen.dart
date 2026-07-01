@@ -50,8 +50,8 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
   final TextEditingController _notesCtrl = TextEditingController();
   final TextEditingController _reportCtrl = TextEditingController();
 
-  // Lista di URL relativi delle foto (es. /uploads/xxx.jpg)
-  final List<String> _photos = [];
+  // Lista di foto: ogni elemento ha 'id' (nodo Photo) e 'url' (Firebase)
+  final List<Map<String, String>> _photos = [];
 
   int _diaryRating = 0;
   String _selectedCategory = 'Affollamento';
@@ -110,7 +110,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
       setState(() {
         _isLoading = false;
         _errorMessage =
-        'Impossibile caricare il diario: utente o tappa non disponibili.';
+            'Impossibile caricare il diario: utente o tappa non disponibili.';
       });
       return;
     }
@@ -138,17 +138,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
           _diarySaved =
               _diaryRating > 0 || _notesCtrl.text.trim().isNotEmpty;
 
-          // Ricarica le foto salvate
           _photos.clear();
-          final savedPhotos = diary['photos'];
-          if (savedPhotos is List) {
-            for (final p in savedPhotos) {
-              final url = p?.toString() ?? '';
-              if (url.isNotEmpty) {
-                _photos.add(url);
-              }
-            }
-          }
         }
 
         if (report is Map<String, dynamic>) {
@@ -171,6 +161,23 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
         _errorMessage = 'Errore durante il caricamento del diario: $e';
       });
     }
+
+    // Carica le foto dai nodi Photo collegati alla tappa
+    try {
+      final photos = await _apiService.getDiaryPhotos(
+        userId: _userId,
+        stopId: widget.stop.id,
+      );
+      if (mounted) {
+        setState(() {
+          _photos
+            ..clear()
+            ..addAll(photos);
+        });
+      }
+    } catch (_) {
+      // se il caricamento foto fallisce, non blocchiamo il diario
+    }
   }
 
   Future<void> _pickAndUploadPhoto() async {
@@ -183,12 +190,35 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 
       if (picked == null) return; // utente ha annullato
 
+      if (!_canUseDb) {
+        _showSnack(message: 'Utente o tappa non disponibili.', color: dangerRed);
+        return;
+      }
+
       setState(() {
         _isUploadingPhoto = true;
       });
 
-      final relativeUrl = await _apiService.uploadDiaryPhoto(
+      // Il DiaryEntry deve esistere PRIMA di collegare la foto.
+      // Salviamo (o aggiorniamo) il diario in modo idempotente.
+      await _apiService.saveTravelDiaryForStop(
+        userId: _userId,
+        stopId: widget.stop.id,
+        placeId: widget.stop.placeId,
+        placeName: widget.stop.placeName,
+        rating: _diaryRating,
+        note: _notesCtrl.text.trim(),
+      );
+
+      // Ora carica la foto: finisce su Firebase e diventa un nodo (:Photo)
+      await _apiService.uploadDiaryPhoto(
         File(picked.path),
+        userId: _userId,
+        stopId: widget.stop.id,
+      );
+
+      // Ricarica la lista foto (con id) dai nodi Photo
+      final photos = await _apiService.getDiaryPhotos(
         userId: _userId,
         stopId: widget.stop.id,
       );
@@ -196,13 +226,14 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
       if (!mounted) return;
 
       setState(() {
-        _photos.add(relativeUrl);
-        _diarySaved = false; // ci sono modifiche non salvate
+        _photos
+          ..clear()
+          ..addAll(photos);
         _isUploadingPhoto = false;
       });
 
       _showSnack(
-        message: 'Foto caricata. Ricordati di salvare il diario.',
+        message: 'Foto caricata e collegata alla tappa.',
         color: primaryBlue,
       );
     } catch (e) {
@@ -214,6 +245,62 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 
       _showSnack(
         message: 'Errore durante il caricamento della foto: $e',
+        color: dangerRed,
+      );
+    }
+  }
+
+  Future<void> _deletePhoto(Map<String, String> photo) async {
+    final photoId = photo['id'] ?? '';
+    if (photoId.isEmpty) {
+      _showSnack(
+        message: 'Foto senza id: impossibile eliminarla.',
+        color: dangerRed,
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Eliminare la foto?'),
+          content: const Text(
+            'La foto verrà rimossa definitivamente dalla tappa.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annulla'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Elimina', style: TextStyle(color: dangerRed)),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await _apiService.deleteDiaryPhoto(
+        userId: _userId,
+        photoId: photoId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _photos.removeWhere((p) => p['id'] == photoId);
+      });
+
+      _showSnack(message: 'Foto eliminata.', color: green);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack(
+        message: 'Errore durante l\'eliminazione: $e',
         color: dangerRed,
       );
     }
@@ -240,7 +327,6 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
         placeName: widget.stop.placeName,
         rating: _diaryRating,
         note: _notesCtrl.text.trim(),
-        photos: _photos,
       );
 
       if (!mounted) return;
@@ -411,6 +497,69 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
       ),
+    );
+  }
+
+  void _openPhotoViewer(String imageUrl) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (context) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(12),
+          child: Stack(
+            children: [
+              InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, progress) {
+                      if (progress == null) return child;
+                      return const SizedBox(
+                        height: 200,
+                        child: Center(
+                          child: CircularProgressIndicator(color: Colors.white),
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => const SizedBox(
+                      height: 200,
+                      child: Center(
+                        child: Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white,
+                          size: 48,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    height: 34,
+                    width: 34,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.close_rounded, color: Colors.black87),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -788,7 +937,7 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
             },
             decoration: _inputDecoration(
               hint:
-              'Scrivi un ricordo, una sensazione o qualcosa che vuoi ricordare...',
+                  'Scrivi un ricordo, una sensazione o qualcosa che vuoi ricordare...',
             ),
           ),
           const SizedBox(height: 12),
@@ -807,14 +956,11 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
               scrollDirection: Axis.horizontal,
               children: [
                 ..._photos.map(
-                      (photoUrl) => _PhotoThumbnail(
-                    imageUrl: ApiService.resolveImageUrl(photoUrl),
-                    onRemove: () {
-                      setState(() {
-                        _photos.remove(photoUrl);
-                        _diarySaved = false;
-                      });
-                    },
+                  (photo) => _PhotoThumbnail(
+                    imageUrl: ApiService.resolveImageUrl(photo['url']!),
+                    onTap: () =>
+                        _openPhotoViewer(ApiService.resolveImageUrl(photo['url']!)),
+                    onRemove: () => _deletePhoto(photo),
                   ),
                 ),
                 _PhotoAddButton(
@@ -842,24 +988,24 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
               ),
               icon: _isSavingDiary
                   ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : Icon(
-                _diarySaved
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.save_outlined,
-              ),
+                      _diarySaved
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.save_outlined,
+                    ),
               label: Text(
                 _isSavingDiary
                     ? 'Salvataggio...'
                     : _diarySaved
-                    ? 'Diario salvato'
-                    : 'Salva diario',
+                        ? 'Diario salvato'
+                        : 'Salva diario',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w900,
@@ -920,12 +1066,12 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
             onChanged: _reportSent
                 ? null
                 : (value) {
-              if (value == null) return;
+                    if (value == null) return;
 
-              setState(() {
-                _selectedCategory = value;
-              });
-            },
+                    setState(() {
+                      _selectedCategory = value;
+                    });
+                  },
           ),
           const SizedBox(height: 14),
           const Text(
@@ -995,18 +1141,18 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
                     ),
                     child: _isDeletingReport
                         ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Colors.white,
-                      size: 25,
-                    ),
+                            Icons.delete_outline_rounded,
+                            color: Colors.white,
+                            size: 25,
+                          ),
                   ),
                 ),
               ],
@@ -1029,13 +1175,13 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
                 ),
                 icon: _isSendingReport
                     ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
                     : const Icon(Icons.send_outlined),
                 label: Text(
                   _isSendingReport
@@ -1178,10 +1324,12 @@ class _TravelDiaryScreenState extends State<TravelDiaryScreen> {
 class _PhotoThumbnail extends StatelessWidget {
   final String imageUrl;
   final VoidCallback onRemove;
+  final VoidCallback onTap;
 
   const _PhotoThumbnail({
     required this.imageUrl,
     required this.onRemove,
+    required this.onTap,
   });
 
   @override
@@ -1192,24 +1340,27 @@ class _PhotoThumbnail extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       child: Stack(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(13),
-            child: Image.network(
-              imageUrl,
-              width: 76,
-              height: 76,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: Image.network(
+                imageUrl,
                 width: 76,
                 height: 76,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDDEBFF),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: const Icon(
-                  Icons.broken_image_outlined,
-                  color: Color(0xFF005A8D),
-                  size: 28,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDDEBFF),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: const Icon(
+                    Icons.broken_image_outlined,
+                    color: Color(0xFF005A8D),
+                    size: 28,
+                  ),
                 ),
               ),
             ),
