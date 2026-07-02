@@ -362,6 +362,20 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                       ],
                     ),
+
+                    const SizedBox(height: 10),
+
+                    if (isOperatore)
+                      Center(
+                        child: Text(
+                          'Per ottenere il codice univoco del comune contattare il servizio clienti: easytour@gmail.com',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 9,
+                            color: Colors.white.withOpacity(0.35),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
