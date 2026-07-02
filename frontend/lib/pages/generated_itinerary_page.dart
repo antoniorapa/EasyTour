@@ -303,8 +303,9 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
     _redistributePauses();
   }
 
-  // Ricalcolo dopo modifiche manuali (sposta giorno / rimuovi / riordina).
-  // Rispetta l'assegnazione ai giorni decisa dall'utente, ma applica comunque
+  // Ricalcolo dopo modifiche manuali che cambiano la COMPOSIZIONE di un
+  // giorno (sposta giorno / rimuovi / aggiungi tappa). Rispetta
+  // l'assegnazione ai giorni decisa dall'utente, ma applica comunque
   // Nearest Neighbor dal centro all'interno di ciascun giorno, così il
   // percorso resta sempre coerente con l'algoritmo richiesto.
   void _recalculateManualDays() {
@@ -320,6 +321,34 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       final ordered = _nearestNeighborOrder(dayStops);
       final timed = _rebuildTimings(
         orderedDayStops: ordered,
+        day: day,
+        startOrder: globalOrder,
+      );
+
+      rebuilt.addAll(timed);
+      globalOrder += timed.length;
+    }
+
+    stops = rebuilt;
+    _redistributePauses();
+  }
+
+  // Ricalcolo dopo uno spostamento manuale su/giù all'interno dello STESSO
+  // giorno: mantiene l'ordine scelto dall'utente e NON riapplica il
+  // Nearest Neighbor (altrimenti l'algoritmo annullerebbe subito lo swap
+  // riportando le tappe nell'ordine "ottimale").
+  void _reorderWithinDay() {
+    if (stops.isEmpty) return;
+
+    final rebuilt = <ItineraryStop>[];
+    int globalOrder = 1;
+
+    for (int day = 1; day <= widget.numeroGiorni; day++) {
+      final dayStops = stops.where((stop) => stop.giorno == day).toList();
+      if (dayStops.isEmpty) continue;
+
+      final timed = _rebuildTimings(
+        orderedDayStops: dayStops, // ordine già corretto: nessun NN
         day: day,
         startOrder: globalOrder,
       );
@@ -387,9 +416,8 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       stops[previousIndex] = stops[index];
       stops[index] = temp;
 
-      // Nota: l'ordine manuale su/giù viene comunque normalizzato da
-      // Nearest Neighbor dentro lo stesso giorno.
-      _recalculateManualDays();
+      // Mantiene l'ordine scelto manualmente: niente Nearest Neighbor qui.
+      _reorderWithinDay();
     });
   }
 
@@ -408,7 +436,8 @@ class _GeneratedItineraryPageState extends State<GeneratedItineraryPage> {
       stops[nextIndex] = stops[index];
       stops[index] = temp;
 
-      _recalculateManualDays();
+      // Mantiene l'ordine scelto manualmente: niente Nearest Neighbor qui.
+      _reorderWithinDay();
     });
   }
 
